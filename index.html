@@ -18,9 +18,20 @@
 <style>
   :root { --bg:#eceefc; --card:#fff; --text:#1d2033; --muted:#6b7090; --line:#dfe2f0; --field:#f6f7fe; --b1:#5b5bf0; --b2:#9b5cf6; --taken:#cfd3e3; --mine:#12a150; --ok:#067647; --err:#c0262d; }
   @media (prefers-color-scheme: dark) { :root { --bg:#0e1020; --card:#181b30; --text:#eceefc; --muted:#a2a7c8; --line:#2b2f4d; --field:#1f2342; --taken:#363b5c; --ok:#4ade80; --err:#ff8a8a; } }
+  /* the log in / sign up screen is always pink and white, whatever theme is chosen after logging in */
+  body:has(#auth:not([hidden])) { --bg:#fff0f6; --card:#fff; --text:#3a1626; --muted:#9a6a80; --line:#f6d3e2; --field:#fff6fa; --b1:#db2777; --b2:#f43f5e; --ok:#067647; --err:#be123c; }
+  /* colour themes: the picker in the top bar sets <html data-theme="...">. No theme = the default look (follows the system dark mode). */
+  html[data-theme="sunset"]   { --bg:#fff0e6; --card:#fff; --text:#2b1a14; --muted:#8a6a5c; --line:#f0dccf; --field:#fff7f1; --b1:#f4511e; --b2:#ff8f3d; --taken:#e6d6cc; --mine:#0f8a5f; --ok:#067647; --err:#c0262d; }
+  html[data-theme="ocean"]    { --bg:#e3f4f7; --card:#fff; --text:#10272d; --muted:#5a7d86; --line:#cfe6ea; --field:#f2fbfc; --b1:#0891b2; --b2:#2563eb; --taken:#cfdde0; --mine:#0f8a5f; --ok:#067647; --err:#c0262d; }
+  html[data-theme="forest"]   { --bg:#e7f4ea; --card:#fff; --text:#14281b; --muted:#5b7a64; --line:#d0e6d6; --field:#f3faf5; --b1:#15803d; --b2:#65a30d; --taken:#d3dfd6; --mine:#1d4ed8; --ok:#067647; --err:#c0262d; }
+  html[data-theme="rose"]     { --bg:#fdecf2; --card:#fff; --text:#2b1420; --muted:#8a5f73; --line:#f3d5e1; --field:#fff5f9; --b1:#e11d48; --b2:#c026d3; --taken:#e8d3dc; --mine:#0f8a5f; --ok:#067647; --err:#b4232a; }
+  html[data-theme="midnight"] { --bg:#0b0b12; --card:#15151f; --text:#f3f1e8; --muted:#a5a2b4; --line:#2a2a3a; --field:#1c1c28; --b1:#d97706; --b2:#ef4444; --taken:#3a3a4c; --mine:#12a150; --ok:#4ade80; --err:#ff8a8a; }
+  .themes { position:absolute; top:16px; left:16px; display:flex; gap:7px; align-items:center; }
+  .themes button { width:22px; height:22px; padding:0; border-radius:50%; border:2px solid var(--card); box-shadow:0 0 0 1px var(--line); transition:transform .1s; }
+  .themes button:hover { transform:scale(1.15); } .themes button.on { box-shadow:0 0 0 2px var(--text); }
   * { box-sizing:border-box; } [hidden] { display:none !important; }
   body { margin:0; min-height:100vh; color:var(--text); font-family:system-ui,Segoe UI,Roboto,sans-serif; padding:20px;
-         background:radial-gradient(900px 500px at 10% -10%, rgba(91,91,240,.25), transparent), radial-gradient(800px 500px at 100% 110%, rgba(155,92,246,.25), transparent), var(--bg); }
+         background:radial-gradient(900px 500px at 10% -10%, color-mix(in srgb, var(--b1) 25%, transparent), transparent), radial-gradient(800px 500px at 100% 110%, color-mix(in srgb, var(--b2) 25%, transparent), transparent), var(--bg); }
   button { font:inherit; cursor:pointer; }
   .btn { padding:11px 16px; border:0; border-radius:10px; color:#fff; font-weight:600; background:linear-gradient(135deg, var(--b1), var(--b2)); transition:transform .1s, opacity .2s; }
   .btn:hover { transform:translateY(-1px); } .btn:disabled { opacity:.5; transform:none; cursor:not-allowed; }
@@ -41,7 +52,7 @@
   h1 { margin:0 0 2px; font-size:1.45rem; } .sub { margin:0 0 18px; color:var(--muted); font-size:.93rem; }
   label { display:grid; gap:6px; font-size:.84rem; font-weight:600; color:var(--muted); }
   input, select { width:100%; padding:12px 13px; font-size:1rem; color:var(--text); background:var(--field); border:1.5px solid var(--line); border-radius:10px; outline:none; transition:border-color .15s, box-shadow .15s; }
-  input:focus, select:focus { border-color:var(--b1); box-shadow:0 0 0 4px rgba(91,91,240,.18); }
+  input:focus, select:focus { border-color:var(--b1); box-shadow:0 0 0 4px color-mix(in srgb, var(--b1) 18%, transparent); }
   .two { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
   .pw { position:relative; } .pw input { padding-right:62px; }
   .eye { position:absolute; right:8px; top:50%; transform:translateY(-50%); border:0; background:transparent; color:var(--b1); font-size:.8rem; font-weight:700; padding:6px; }
@@ -57,8 +68,13 @@
   .side { position:sticky; top:20px; }
   .side #mine { max-height:70vh; overflow-y:auto; padding-right:2px; }
   .card { background:var(--card); border-radius:18px; padding:20px; box-shadow:0 10px 30px rgba(40,40,110,.14); }
-  .top { display:flex; justify-content:space-between; align-items:center; gap:10px; }
-  .hi { font-weight:700; } .hi span { color:var(--muted); font-weight:400; font-size:.85rem; display:block; }
+  .top { position:relative; display:flex; flex-direction:column; align-items:center; text-align:center; gap:6px; padding:22px 20px 18px; }
+  .top #logout { position:absolute; top:14px; right:14px; }
+  .avatar { width:84px; height:84px; border-radius:50%; display:grid; place-items:center; overflow:hidden; color:#fff; font-size:2.3rem; font-weight:800;
+            background:linear-gradient(135deg, var(--b1), var(--b2)); border:4px solid var(--card); box-shadow:0 6px 18px rgba(60,60,160,.35); }
+  .avatar svg { width:100%; height:100%; display:block; }
+  .hi { font-weight:800; font-size:1.7rem; line-height:1.15; word-break:break-word; } .hi span { color:var(--muted); font-weight:400; font-size:.9rem; display:block; margin-top:2px; }
+  .hello { color:var(--muted); font-size:.9rem; }
   h3 { margin:0 0 4px; font-size:1.05rem; }
 
   /* step 1: poster slider (gallery) */
@@ -83,6 +99,28 @@
   .gal-info { font-size:.9rem; color:var(--muted); text-align:center; } .gal-info b { color:var(--text); }
   @media (prefers-reduced-motion: reduce) { .track { scroll-behavior:auto; } .poster { transition:none; } }
 
+  /* home page: language sections + movie grid */
+  .chips { display:flex; flex-wrap:wrap; gap:10px; margin:12px 0 4px; }
+  .chip { padding:9px 16px; border-radius:999px; border:1.5px solid var(--line); background:var(--field); color:var(--text); font-weight:600; font-size:.92rem; transition:border-color .15s, transform .1s; }
+  .chip:hover { transform:translateY(-1px); border-color:var(--b1); }
+  .chip small { margin-left:6px; opacity:.7; font-size:.78rem; }
+  .chip.on small { color:#fff; opacity:.9; }
+  .chip.on { border-color:var(--b1); background:linear-gradient(135deg, var(--b1), var(--b2)); color:#fff; }
+  .mgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:18px; padding:16px 2px 6px; }
+  .mgrid .poster { width:100%; height:auto; aspect-ratio:2/3; }
+  .mgrid .none { grid-column:1/-1; text-align:center; color:var(--muted); padding:24px; }
+  /* movie page: back button + poster/name header */
+  #home-view, #movie-view { display:grid; gap:16px; min-width:0; }
+  .back { justify-self:start; }
+  .mhero { display:flex; gap:22px; align-items:flex-start; flex-wrap:wrap; }
+  .mposter { flex:none; width:150px; height:225px; cursor:default; }
+  .mposter:hover { transform:none; box-shadow:0 8px 22px rgba(20,20,60,.28); }
+  .minfo { flex:1 1 240px; min-width:0; display:grid; gap:8px; align-content:start; }
+  .minfo h1 { margin:0; font-size:1.7rem; line-height:1.15; }
+  .meta { display:flex; flex-wrap:wrap; gap:8px; }
+  .tag { padding:4px 11px; border-radius:999px; background:var(--field); border:1px solid var(--line); font-size:.82rem; }
+  .tag.price { background:linear-gradient(135deg, var(--b1), var(--b2)); border:0; color:#fff; font-weight:700; }
+
   /* step 2: show times */
   .step { margin-top:18px; } .step:first-of-type { margin-top:0; }
   .step h3 span { display:inline-grid; place-items:center; width:22px; height:22px; margin-right:8px; border-radius:50%; background:linear-gradient(135deg, var(--b1), var(--b2)); color:#fff; font-size:.78rem; }
@@ -101,6 +139,11 @@
   .seat { padding:9px 0; font-size:.76rem; background:var(--field); color:var(--text); border:1px solid var(--line); border-radius:7px; }
   .seat:hover:not(:disabled) { background:var(--b1); color:#fff; border-color:var(--b1); }
   .seat.taken { background:var(--taken); color:var(--muted); cursor:not-allowed; }
+  .seat.busy { background:repeating-linear-gradient(45deg,#fde68a,#fde68a 6px,#fcd34d 6px,#fcd34d 12px); color:#5c4300; border-color:#f5b301; cursor:pointer; }
+  .qnote { margin-top:8px; padding:8px 10px; border-radius:8px; background:#fff4d6; color:#6b4a00; font-size:.85rem; }
+  .bigwait { font-size:1.35rem; font-weight:800; text-align:center; margin:12px 0 6px; }
+  .spin { width:34px; height:34px; margin:10px auto; border-radius:50%; border:4px solid var(--line); border-top-color:var(--b1); animation:spin 1s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } } @media (prefers-reduced-motion: reduce) { .spin { animation:none; } }
   .seat.held { background:#f5b301; color:#3a2a00; border-color:#f5b301; cursor:not-allowed; }
   .seat.mine { background:var(--mine); color:#fff; border-color:var(--mine); cursor:default; }
   .legend { font-size:.76rem; color:var(--muted); margin-top:12px; }
@@ -137,7 +180,7 @@
   .ftab.on { background:linear-gradient(135deg, var(--b1), var(--b2)); color:#fff; border-color:transparent; }
   #food-list { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:10px; max-height:260px; overflow-y:auto; padding:2px; }
   .fcard { display:grid; gap:2px; justify-items:center; text-align:center; padding:12px 8px 10px; background:var(--field); border:1.5px solid var(--line); border-radius:14px; transition:border-color .15s, box-shadow .15s; }
-  .fcard.has { border-color:var(--b1); box-shadow:0 0 0 3px rgba(91,91,240,.15); }
+  .fcard.has { border-color:var(--b1); box-shadow:0 0 0 3px color-mix(in srgb, var(--b1) 15%, transparent); }
   .ficon { font-size:2rem; line-height:1.1; }
   .fname { font-size:.86rem; font-weight:600; } .fprice { font-size:.82rem; color:var(--muted); margin-bottom:6px; }
   .fadd { width:100%; padding:7px 0; border:1.5px solid var(--b1); border-radius:9px; background:transparent; color:var(--b1); font-weight:700; font-size:.84rem; }
@@ -151,7 +194,7 @@
 
   /* movie reviews (shown under the page for the selected movie) */
   textarea { width:100%; padding:12px 13px; font:inherit; font-size:1rem; color:var(--text); background:var(--field); border:1.5px solid var(--line); border-radius:10px; outline:none; resize:vertical; min-height:96px; }
-  textarea:focus { border-color:var(--b1); box-shadow:0 0 0 4px rgba(91,91,240,.18); }
+  textarea:focus { border-color:var(--b1); box-shadow:0 0 0 4px color-mix(in srgb, var(--b1) 18%, transparent); }
   .rev-head { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
   .rev-summary { display:flex; align-items:center; gap:10px; margin:6px 0 4px; color:var(--muted); font-size:.9rem; }
   .rev-summary .big { font-size:1.9rem; color:var(--text); line-height:1; }
@@ -219,39 +262,45 @@
 <!-- ============ SCREEN 2: booking page ============ -->
 <main id="app" class="wrap" hidden>
   <div class="card top">
-    <div class="hi" id="hi"></div>
+    <div class="themes" id="themes" role="group" aria-label="Colour theme"></div>
     <button class="ghost" id="logout">Log out</button>
+    <div class="avatar" id="avatar" aria-hidden="true"></div>
+    <div class="hello">Welcome back</div>
+    <div class="hi" id="hi"></div>
   </div>
 
   <div id="msg" role="status"></div>
 
-  <!-- STEP 1: poster slider (gallery) - swipe, drag, use the arrows, or wait for it to slide by itself -->
-  <div class="card gallery-card">
-    <h3><span style="display:inline-grid;place-items:center;width:22px;height:22px;margin-right:8px;border-radius:50%;background:linear-gradient(135deg,var(--b1),var(--b2));color:#fff;font-size:.78rem">1</span>Choose a movie</h3>
-    <div class="gallery">
-      <button class="arrow prev" id="g-prev" type="button" aria-label="Previous movies">&#8249;</button>
-      <div class="track" id="movies" tabindex="0" aria-label="Movie posters"></div>
-      <button class="arrow next" id="g-next" type="button" aria-label="Next movies">&#8250;</button>
+  <!-- HOME PAGE: language sections, then a grid of movies. Clicking a movie opens that movie's own page. -->
+  <section id="home-view">
+    <div class="card">
+      <h3>Choose a movie</h3>
+      <div class="chips" id="sections" role="tablist" aria-label="Movie sections"></div>
+      <div class="mgrid" id="movies" aria-label="Movie posters"></div>
     </div>
-    <div class="gal-info" id="gal-info"></div>
-  </div>
+  </section>
+
+  <!-- MOVIE PAGE: name + poster on top, then show times, seats, booking details and reviews -->
+  <section id="movie-view" hidden>
+  <button class="ghost back" id="back" type="button">&#8592; All movies</button>
+  <div class="card mhero" id="mhero"></div>
 
   <div class="layout">
     <!-- LEFT: step 1 movie -> step 2 show time -> step 3 seats -->
     <div class="card">
       <div class="step" id="times-box" hidden>
-        <h3><span>2</span>Choose a show time</h3>
+        <h3><span>1</span>Choose a show time</h3>
         <div class="times" id="times"></div>
       </div>
 
       <div class="hint" id="hint">Select a movie to see its show timings.</div>
 
       <div class="step" id="seats-box" hidden>
-        <h3><span>3</span>Pick your seats</h3>
+        <h3><span>2</span>Pick your seats</h3>
         <div class="now" id="now"></div>
         <div class="screen">SCREEN</div>
         <div id="grid"></div>
-        <div class="legend">Light = free &middot; Grey = taken &middot; Green = yours. Click a free seat to book.</div>
+        <div class="legend">Light = free &middot; Grey = taken &middot; Green = yours &middot; Striped = someone is paying right now (click to join the line).</div>
       </div>
     </div>
 
@@ -272,6 +321,7 @@
     <div class="rev-summary" id="rev-summary"></div>
     <div id="rev-list"></div>
   </div>
+  </section>
 </main>
 
 <!-- ============ POP-UP: how many people + their names ============ -->
@@ -290,6 +340,17 @@
   <div class="preview" id="preview"></div>
   <div id="dlg-err" class="err" role="alert"></div>
   <div class="actions"><button class="ghost" id="dlg-cancel" type="button">Cancel</button><button class="btn" id="dlg-ok" type="button">Continue to payment</button></div>
+</dialog>
+
+<!-- ============ POP-UP: waiting line (someone else is paying for the seat you chose) ============ -->
+<dialog id="wait">
+  <h3>Waiting for your seat</h3>
+  <p class="sub" id="wait-sub" style="margin-bottom:6px"></p>
+  <div class="spin" aria-hidden="true"></div>
+  <div class="bigwait" id="wait-pos"></div>
+  <div class="qnote" id="wait-note"></div>
+  <div id="wait-err" class="err" role="alert"></div>
+  <div class="actions"><button class="ghost" id="wait-cancel" type="button">Leave the line</button></div>
 </dialog>
 
 <!-- ============ POP-UP: payment (practice mode when no Razorpay keys are set) ============ -->
@@ -334,8 +395,27 @@
 </dialog>
 
 <script>
+/* ---------- colour themes (saved in this browser) ---------- */
+const THEMES = [["", "Default", "#5b5bf0", "#9b5cf6"], ["sunset", "Sunset", "#f4511e", "#ff8f3d"], ["ocean", "Ocean", "#0891b2", "#2563eb"],
+                ["forest", "Forest", "#15803d", "#65a30d"], ["rose", "Rose", "#e11d48", "#c026d3"], ["midnight", "Midnight", "#d97706", "#ef4444"]];
+function setTheme(name) {
+  if (name) document.documentElement.setAttribute("data-theme", name); else document.documentElement.removeAttribute("data-theme");
+  try { localStorage.setItem("theme", name); } catch (e) { /* storage may be blocked: the theme just won't be remembered */ }
+  document.querySelectorAll("#themes button").forEach((b) => b.classList.toggle("on", b.dataset.t === name));
+}
+function buildThemes() {
+  const box = document.getElementById("themes"), cur = document.documentElement.getAttribute("data-theme") || "";
+  for (const [id, label, c1, c2] of THEMES) {
+    const b = document.createElement("button"); b.type = "button"; b.dataset.t = id; b.title = label; b.setAttribute("aria-label", label + " theme");
+    b.style.background = "linear-gradient(135deg," + c1 + "," + c2 + ")"; if (id === cur) b.className = "on";
+    b.onclick = () => setTheme(id); box.appendChild(b);
+  }
+}
+try { const t = localStorage.getItem("theme"); if (t && THEMES.some((x) => x[0] === t)) document.documentElement.setAttribute("data-theme", t); } catch (e) { /* ignore */ }
+
 /* ---------- basics: shared variables and helpers ---------- */
 const $ = (id) => document.getElementById(id);
+buildThemes();
 const MAX_PARTY = 6, PER_ROW = 8, MAX_FOOD_QTY = 10;   // keep in sync with MAX_PARTY, SEATS_PER_ROW and MAX_FOOD_QTY in booking.py
 let token = sessionStorage.getItem("t") || "", meName = "";
 let movies = [];                    // every movie, each with its list of shows
@@ -357,7 +437,7 @@ async function api(path, method, body) {
   if (!r.ok) throw new Error(typeof d.detail === "string" ? d.detail : "Something went wrong");
   return d;
 }
-function logout() { token = ""; sessionStorage.removeItem("t"); $("dlg").close(); $("rev").close(); $("app").hidden = true; $("auth").hidden = false; }
+function logout() { location.hash = ""; token = ""; sessionStorage.removeItem("t"); $("wait").close(); $("pay").close(); $("dlg").close(); $("rev").close(); $("app").hidden = true; $("auth").hidden = false; }
 $("logout").onclick = logout;
 
 /* ---------- log in / sign up screen ---------- */
@@ -403,112 +483,136 @@ $("signup-form").onsubmit = (e) => {
   submitAuth($("s-btn"), "/api/signup", { username, email, phone, password });
 };
 
+/* ---------- demo profile picture: a person icon on a colour that depends on the name (no upload needed) ---------- */
+function drawAvatar(name) {
+  let h = 0; for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  const box = $("avatar"); box.textContent = "";
+  box.style.background = "linear-gradient(135deg, hsl(" + h + " 70% 55%), hsl(" + ((h + 50) % 360) + " 70% 45%))";
+  const NS = "http://www.w3.org/2000/svg", svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 100 100");
+  const head = document.createElementNS(NS, "circle"); head.setAttribute("cx", 50); head.setAttribute("cy", 38); head.setAttribute("r", 18);
+  const body = document.createElementNS(NS, "path"); body.setAttribute("d", "M14 100c0-22 16-36 36-36s36 14 36 36z");
+  for (const e of [head, body]) { e.setAttribute("fill", "rgba(255,255,255,.92)"); svg.appendChild(e); }
+  box.appendChild(svg);
+}
+
 /* ---------- booking page: movie -> show time -> seats ---------- */
 async function start() {   // runs after a successful log in
   const [me, list, food] = await Promise.all([api("/api/me"), api("/api/movies"), api("/api/food")]);
   meName = me.username;
-  const hi = $("hi"); hi.textContent = "Hi, " + me.username;
+  const hi = $("hi"); hi.textContent = me.username;
+  drawAvatar(me.username);
   hi.appendChild(el("span", "", me.email));
-  movies = list; menu = food; movie = null; show = null; pauseUntil = 0; $("reviews-card").hidden = true;
+  movies = list; menu = food; movie = null; show = null; $("reviews-card").hidden = true;
   $("auth").hidden = true; $("app").hidden = false; msg("");
-  buildGallery(); drawTimes(); drawSeatsArea();
-  loadMine();
-  if (movies.length) chooseMovie(movies[0], true);   // first movie + its first show time are selected by default
+  buildHome(); loadMine();
   await openPendingReview();
+  route();
 }
 
-// Step 1: the poster slider. Clicking a poster chooses the movie and shows its show times (step 2).
-let dragged = false, pauseUntil = 0, hovering = false, autoTimer = 0;
+// HOME PAGE: language sections (chips) + a grid of posters. Clicking a poster opens that movie's page.
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const SOUTH = ["Tamil", "Telugu", "Malayalam", "Kannada"];
+let section = "All";
+function sectionOf(m) {   // which chip a movie belongs to
+  if (m.language === "Hindi" || m.language === "English") return m.language;
+  return SOUTH.includes(m.language) ? "South" : "Multi-language";
+}
 function releaseInfo(m) {   // "Now showing" if the release date has passed, otherwise "Releasing 20 Nov"
   const d = new Date(m.release + "T00:00:00"), soon = d > new Date();
   return { soon, text: soon ? "Releasing " + d.getDate() + " " + MONTHS[d.getMonth()] : "Now showing" };
 }
 function captionText(m) {   // "Epic · ★ 4.5" - the star rating appears once a movie has reviews
-  return m.genre + (m.rating_count ? " \u00b7 \u2605 " + m.rating_avg.toFixed(1) : "");
+  return m.genre + (m.rating_count ? " · ★ " + m.rating_avg.toFixed(1) : "");
 }
 function updateGalleryCaptions() {
-  document.querySelectorAll(".poster").forEach((p) => {
+  document.querySelectorAll(".mgrid .poster").forEach((p) => {
     const m = movies.find((x) => x.id === +p.dataset.id);
     if (m) p.querySelector(".cap span").textContent = captionText(m);
   });
 }
-function buildGallery() {
+function posterArt(m, cls) {   // poster picture (or the emoji on the colours when there is no image)
+  const b = el("div", cls); b.style.setProperty("--c1", m.colors[0]); b.style.setProperty("--c2", m.colors[1]);
+  const art = el("div", "art" + (m.poster ? " img" : ""), m.poster ? "" : m.emoji);
+  if (m.poster) art.style.setProperty("--img", "url('" + m.poster + "')");
+  b.appendChild(art);
+  return b;
+}
+function buildHome() {
+  // section chips: All, then only the sections that have movies, each with a count
+  const names = ["Hindi", "English", "South", "Multi-language"].filter((n) => movies.some((m) => sectionOf(m) === n));
+  if (section !== "All" && !names.includes(section)) section = "All";
+  const chips = $("sections"); chips.textContent = "";
+  for (const n of ["All", ...names]) {
+    const count = n === "All" ? movies.length : movies.filter((m) => sectionOf(m) === n).length;
+    const c = el("button", "chip" + (n === section ? " on" : ""), n); c.type = "button";
+    c.setAttribute("role", "tab"); c.setAttribute("aria-selected", n === section);
+    c.appendChild(el("small", "", String(count)));
+    c.onclick = () => { section = n; buildHome(); };
+    chips.appendChild(c);
+  }
   const box = $("movies"); box.textContent = "";
-  if (!movies.length) { box.textContent = "No movies are showing right now."; return; }
-  for (const m of movies) {
+  const list = movies.filter((m) => section === "All" || sectionOf(m) === section);
+  if (!list.length) { box.appendChild(el("div", "none", "No movies are showing right now.")); return; }
+  for (const m of list) {
     const rel = releaseInfo(m);
-    const b = el("button", "poster"); b.type = "button"; b.dataset.id = m.id;
-    b.style.setProperty("--c1", m.colors[0]); b.style.setProperty("--c2", m.colors[1]);
-    b.setAttribute("aria-label", m.name + ", " + m.genre + ", " + rel.text);
-    const art = el("div", "art" + (m.poster ? " img" : ""), m.poster ? "" : m.emoji);
-    if (m.poster) art.style.setProperty("--img", "url('" + m.poster + "')");
-    b.appendChild(art);
+    const b = posterArt(m, "poster"); b.dataset.id = m.id;
+    b.setAttribute("role", "link"); b.tabIndex = 0; b.setAttribute("aria-label", m.name + ", " + m.genre + ", " + rel.text);
     b.appendChild(el("span", "pbadge" + (rel.soon ? " soon" : ""), rel.text));
     const cap = el("div", "cap"); cap.appendChild(el("b", "", m.name)); cap.appendChild(el("span", "", captionText(m)));
     b.appendChild(cap);
-    b.onclick = () => { if (dragged) { dragged = false; return; } chooseMovie(m); };
+    const open = () => { location.hash = "#/movie/" + m.id; };
+    b.onclick = open; b.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } };
     box.appendChild(b);
   }
-  markGallery();
-  startGalleryControls();
 }
-// auto = true when the page picks the movie by itself (first movie on load): no scrolling, the slider keeps sliding
-function chooseMovie(m, auto = false) {
+
+// Routing: the address bar shows #/movie/<id> on a movie page, so the browser Back button works and a page can be bookmarked.
+function route() {
+  if (!token || $("app").hidden) return;
+  const m = /^#\/movie\/(\d+)$/.exec(location.hash);
+  const found = m && movies.find((x) => x.id === +m[1]);
+  if (found) showMovie(found); else showHome();
+}
+window.addEventListener("hashchange", route);
+$("back").onclick = () => { location.hash = "#/"; };
+
+function showHome() {
+  movie = null; show = null; msg("");
+  $("movie-view").hidden = true; $("home-view").hidden = false;
+  buildHome(); reloadMovies().catch(() => {});
+  window.scrollTo(0, 0);
+}
+function drawHero() {   // top of the movie page: poster, name, details
+  const box = $("mhero"); box.textContent = "";
+  if (!movie) return;
+  const rel = releaseInfo(movie);
+  box.appendChild(posterArt(movie, "poster mposter"));
+  const info = el("div", "minfo");
+  info.appendChild(el("h1", "", movie.name));
+  const meta = el("div", "meta");
+  for (const t of [movie.language, movie.genre, rel.text]) meta.appendChild(el("span", "tag", t));
+  if (movie.rating_count) meta.appendChild(el("span", "tag", "★ " + movie.rating_avg.toFixed(1) + " (" + movie.rating_count + ")"));
+  meta.appendChild(el("span", "tag price", rupees(movie.price) + " per ticket"));
+  info.appendChild(meta);
+  info.appendChild(el("div", "gal-info", "Choose a show time, then pick your seats."));
+  info.lastChild.style.textAlign = "left";
+  box.appendChild(info);
+}
+function showMovie(m) {
+  const same = movie && movie.id === m.id;
   movie = m; msg("");
-  show = m.shows[0] || null;                  // the first show time is selected too, so the seats appear at once
-  if (!auto) pauseUntil = Infinity;           // the user is booking now, so stop the auto-slide
-  markGallery(); drawTimes(); drawSeatsArea();
+  if (!same) show = m.shows[0] || null;       // the first show time is selected, so the seats appear at once
+  $("home-view").hidden = true; $("movie-view").hidden = false;
+  drawHero(); drawTimes(); drawSeatsArea();
   if (show) loadSeats().catch(() => {});
-  reviewData = null; $("reviews-card").hidden = false;   // show the reviews area at once, then fill it
-  $("rev-title").textContent = "Reviews for " + m.name; $("rev-summary").textContent = ""; $("rev-write").hidden = true;
-  $("rev-list").textContent = "Loading reviews\u2026";
-  loadReviews().catch(() => {});
-  if (auto) return;
-  document.querySelector('.poster[data-id="' + m.id + '"]').scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
-  $("times-box").scrollIntoView({ behavior: "smooth", block: "nearest" });
-}
-function markGallery() {   // highlight the chosen poster and update the line under the slider
-  document.querySelectorAll(".poster").forEach((p) => p.classList.toggle("on", !!movie && +p.dataset.id === movie.id));
-  const info = $("gal-info"); info.textContent = "";
-  if (!movie) { info.textContent = "Swipe, drag or use the arrows to browse. Tap a poster to choose the movie."; return; }
-  info.appendChild(el("b", "", movie.name));
-  info.appendChild(document.createTextNode(" \u00b7 " + movie.genre + " \u00b7 " + movie.language + " \u00b7 " + releaseInfo(movie).text));
-}
-let galleryReady = false;
-function startGalleryControls() {   // arrows, mouse dragging and the gentle auto-slide (set up once)
-  if (galleryReady) return; galleryReady = true;
-  const box = $("movies"), wrap = box.parentElement;
-  const step = () => Math.max(box.clientWidth * 0.8, 170);
-  $("g-prev").onclick = () => { pauseUntil = Date.now() + 10000; box.scrollBy({ left: -step() }); };
-  $("g-next").onclick = () => { pauseUntil = Date.now() + 10000; box.scrollBy({ left: step() }); };
-  // mouse drag (touch screens already swipe by themselves)
-  let down = false, startX = 0, startLeft = 0;
-  box.addEventListener("pointerdown", (e) => { if (e.pointerType !== "mouse") return; down = true; dragged = false; startX = e.clientX; startLeft = box.scrollLeft; pauseUntil = Date.now() + 10000; });
-  window.addEventListener("pointermove", (e) => {
-    if (!down) return;
-    const dx = e.clientX - startX;
-    if (Math.abs(dx) > 5) { dragged = true; box.classList.add("drag"); }
-    if (dragged) box.scrollLeft = startLeft - dx;
-  });
-  window.addEventListener("pointerup", () => { if (!down) return; down = false; box.classList.remove("drag"); setTimeout(() => { dragged = false; }, 0); });
-  box.addEventListener("touchstart", () => { pauseUntil = Date.now() + 10000; }, { passive: true });
-  box.addEventListener("wheel", () => { pauseUntil = Date.now() + 10000; }, { passive: true });
-  wrap.addEventListener("mouseenter", () => { hovering = true; });
-  wrap.addEventListener("mouseleave", () => { hovering = false; });
-  wrap.addEventListener("focusin", () => { hovering = true; });
-  wrap.addEventListener("focusout", () => { hovering = false; });
-  box.addEventListener("keydown", (e) => {
-    if (e.key === "ArrowRight") { box.scrollBy({ left: step() }); e.preventDefault(); }
-    if (e.key === "ArrowLeft") { box.scrollBy({ left: -step() }); e.preventDefault(); }
-  });
-  clearInterval(autoTimer);
-  if (!matchMedia("(prefers-reduced-motion: reduce)").matches)
-    autoTimer = setInterval(() => {   // slide along every 3.5 seconds until the user interacts
-      if ($("app").hidden || hovering || Date.now() < pauseUntil) return;
-      if (box.scrollLeft >= box.scrollWidth - box.clientWidth - 4) box.scrollTo({ left: 0 });
-      else box.scrollBy({ left: 176 });
-    }, 3500);
+  if (!same) {
+    reviewData = null; $("reviews-card").hidden = false;
+    $("rev-title").textContent = "Reviews for " + m.name; $("rev-summary").textContent = ""; $("rev-write").hidden = true;
+    $("rev-list").textContent = "Loading reviews…";
+    loadReviews().catch(() => {});
+    window.scrollTo(0, 0);
+  }
 }
 
 // Step 2: the show times of the chosen movie. Clicking one shows the seats (step 3).
@@ -547,9 +651,10 @@ async function loadSeats() {
   seatIds = seats.map((s) => s.id); seatState = {};
   const g = $("grid"); g.textContent = "";
   for (const s of seats) {
-    seatState[s.id] = s.state;   // "free", "taken", "mine" (paid) or "held" (mine, waiting for payment)
+    seatState[s.id] = s.state;   // "free", "taken", "busy" (someone is paying for it now), "mine" (paid) or "held" (mine, waiting for payment)
     const b = el("button", "seat " + (s.state === "free" ? "" : s.state), s.id);
-    b.disabled = s.state !== "free";
+    b.disabled = s.state !== "free" && s.state !== "busy";
+    if (s.state === "busy") b.title = "Someone is paying for this seat. Click to join the line for it.";
     b.onclick = () => openDialog(s.id);
     g.appendChild(b);
   }
@@ -572,15 +677,15 @@ function renderDialog() {
     inp.oninput = () => { names[i] = inp.value; };
     lab.appendChild(inp); box.appendChild(lab);
   });
-  const seats = partySeats();
-  const free = seats && seats.every((s) => seatState[s] === "free");
-  renderPreview(seats, free);
+  renderPreview();
 }
-function renderPreview(seats, free) {   // seats and price breakdown (the server works out the real price again when you pay)
-  if (seats === undefined) { seats = partySeats(); free = seats && seats.every((s) => seatState[s] === "free"); }
+function renderPreview() {   // seats and price breakdown (the server works out the real price again when you pay)
+  const seats = partySeats();
+  const ok = !!seats && seats.every((s) => seatState[s] === "free" || seatState[s] === "busy");   // busy = you can wait for it
+  const queue = ok && seats.some((s) => seatState[s] === "busy");
   const box = $("preview"); box.textContent = "";
   if (!seats) box.textContent = "Not enough seats to the right in this row. Pick a seat further left or fewer people.";
-  else if (!free) box.textContent = "Some of these seats are not available: " + seats.join(", ") + ". Pick fewer people or another seat.";
+  else if (!ok) box.textContent = "Some of these seats are not available: " + seats.join(", ") + ". Pick fewer people or another seat.";
   else {
     const price = movie.price || 0, tickets = price * names.length, food = foodTotal();
     const row = (a, b, cls) => { const r = el("div", "bill" + (cls ? " " + cls : "")); r.appendChild(el("span", "", a)); r.appendChild(el("span", "", b)); box.appendChild(r); };
@@ -588,9 +693,11 @@ function renderPreview(seats, free) {   // seats and price breakdown (the server
     row(names.length + " \u00d7 " + rupees(price), rupees(tickets));
     if (food) row("Food & drinks", rupees(food));
     row("Total to pay", rupees(tickets + food), "total");
-    $("dlg-ok").textContent = "Pay " + rupees(tickets + food);
+    $("dlg-ok").textContent = queue ? "Join the line" : "Pay " + rupees(tickets + food);
+    if (queue) box.appendChild(el("div", "qnote", "Someone else is paying for " + seats.filter((s) => seatState[s] === "busy").join(", ") +
+      " right now. Join the line: if they cancel or run out of time, your payment window opens automatically. If they pay, the seat is theirs."));
   }
-  $("dlg-ok").disabled = !free;
+  $("dlg-ok").disabled = !ok;
 }
 /* ---------- food picker: category tabs + a card for every item ---------- */
 const rupees = (n) => "\u20b9" + n;
@@ -656,11 +763,46 @@ $("dlg-ok").onclick = async () => {
       seat: pick, names: clean,
       food: Object.entries(cart).filter(([, q]) => q > 0).map(([id, qty]) => ({ id, qty })),
     });
-    paying = true;
-    if (c.mode === "razorpay") await payWithRazorpay(c, clean); else openDemoPayment(c, clean);
+    if (c.queued) openWait(c, clean);   // another person is paying for these seats: wait in the line
+    else { paying = true; if (c.mode === "razorpay") await payWithRazorpay(c, clean); else openDemoPayment(c, clean); }
   } catch (e) { $("dlg-err").textContent = e.message; loadSeats().then(renderDialog); }
   $("dlg-ok").disabled = false;
 };
+
+/* ---------- the waiting line: someone else is paying for the seat you chose ---------- */
+let waitId = 0, waitTimer = 0, waitWho = [];
+function drawWait(d) {
+  $("wait-pos").textContent = d.position > 1 ? "You are number " + d.position + " in the line" : "You are next in line";
+  const m = Math.floor(d.wait_up_to / 60), sec = String(d.wait_up_to % 60).padStart(2, "0");
+  $("wait-note").textContent = "Another person is paying for " + d.seats.join(", ") + " right now (their time runs out in about " + m + ":" + sec +
+    "). If they cancel or their time runs out, your payment window opens here by itself. If they pay, the seats are theirs and we will tell you. Keep this window open.";
+}
+function openWait(d, who) {
+  waitId = d.id; waitWho = who; $("wait-err").textContent = "";
+  $("wait-sub").textContent = movie.name + " · " + show.time + " · Seats " + d.seats.join(", ");
+  drawWait(d); clearInterval(waitTimer); waitTimer = setInterval(pollWait, 2000);
+  $("wait").showModal();
+}
+async function pollWait() {
+  if (!waitId) return;
+  try {
+    const d = await api("/api/waitlist/" + waitId);
+    if (d.status === "waiting" || d.status === "promoting") { drawWait(d); return; }
+    clearInterval(waitTimer); waitId = 0; $("wait").close();   // waitId = 0 first: closing the window must not leave the line again
+    if (d.status === "ready") {   // it is your turn: the seats are held for you, pay now
+      const co = d.checkout; paying = true; msg("It is your turn! Complete the payment to confirm your seats.", true);
+      if (co.mode === "razorpay") await payWithRazorpay(co, waitWho); else openDemoPayment(co, waitWho);
+    } else { $("dlg-err").textContent = d.message || "These seats are no longer available."; loadSeats().then(renderDialog); }
+  } catch (e) { $("wait-err").textContent = e.message; }
+}
+$("wait-cancel").onclick = () => $("wait").close();
+$("wait").addEventListener("close", async () => {   // "Leave the line", or Esc
+  clearInterval(waitTimer);
+  if (!waitId) return;
+  const id = waitId; waitId = 0;
+  try { await api("/api/waitlist/" + id, "DELETE"); } catch (e) { /* it expires by itself anyway */ }
+  loadSeats().then(renderDialog);
+});
 
 /* ---------- real payment: Razorpay's own window (card details never touch our server) ---------- */
 function loadRazorpay() {
@@ -832,6 +974,7 @@ async function reloadMovies() {   // refresh the star ratings on the posters
   if (movie) movie = movies.find((m) => m.id === movie.id) || null;
   if (movie && show) show = movie.shows.find((s) => s.id === show.id) || null;
   updateGalleryCaptions();
+  if (movie) drawHero();
 }
 
 function drawStars() {
@@ -869,7 +1012,8 @@ async function openPendingReview() {
   const m = movies.find((x) => String(x.id) === pendingReview);
   pendingReview = null; history.replaceState(null, "", location.pathname);
   if (!m) return;
-  chooseMovie(m);
+  history.replaceState(null, "", location.pathname + "#/movie/" + m.id);
+  showMovie(m);
   await loadReviews();
   if (reviewData && reviewData.can_review) openReviewDialog();
   else msg("You can review a movie after you have booked tickets for it.", false);
@@ -904,7 +1048,7 @@ async function loadMine() {
 
 /* ---------- startup ---------- */
 // Re-load the seat map every 5 seconds so other people's bookings show up.
-setInterval(() => { if (token && !$("app").hidden && !$("dlg").open && !$("rev").open && !$("pay").open && !paying) refresh(); }, 5000);
+setInterval(() => { if (token && !$("app").hidden && !$("dlg").open && !$("rev").open && !$("pay").open && !$("wait").open && !paying) refresh(); }, 5000);
 // If a login token is already saved in this browser tab, skip the login screen.
 if (token) start().catch(() => logout());
 </script></body></html>
