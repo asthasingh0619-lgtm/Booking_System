@@ -35,6 +35,9 @@ the customer pays, and confirms the booking only after the payment is verified. 
     if the customer closes the browser right after paying.
   - Without keys the app runs in DEMO mode: a practice payment window, no real money moves.
   - Cancelling a paid booking refunds it in full.
+  - QUEUE: if someone else is paying for a seat right now, the next person joins a waiting line for it (first come,
+    first served). The first person gets the payment window. If they cancel or run out of time, the next person's
+    payment window opens by itself; if they pay, the others are told the seat is gone.
 
 REVIEWS: 2 minutes (REVIEW_DELAY_SECONDS) after the ticket email, a second email asks the user to review the movie.
 Its link opens the site with the review box ready. Only people who booked a movie can review it (one review per
@@ -167,6 +170,7 @@ RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "")                      # public
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "")              # SECRET: never put it in index.html or in git
 RAZORPAY_WEBHOOK_SECRET = os.getenv("RAZORPAY_WEBHOOK_SECRET", "")      # optional, for the webhook
 RAZORPAY_API = os.getenv("RAZORPAY_API_BASE", "https://api.razorpay.com/v1").rstrip("/")
+WAIT_SECONDS = PAYMENT_HOLD_SECONDS * 3   # a person waits in the line at most this long
 PAYMENT_MODE = "razorpay" if (RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET) else "demo"
 
 engine = create_engine(
@@ -275,6 +279,21 @@ class PaymentOrder(Base):
     payload = Column(String, nullable=False)                   # JSON: what was booked (used if payment arrives late)
 
 
+class WaitlistEntry(Base):
+    """Someone who wants seats that another person is paying for right now.
+    Status: waiting -> promoting -> ready (the seats are now held for them; they pay), or failed / cancelled / expired."""
+    __tablename__ = "waitlist"
+    id = Column(Integer, primary_key=True)
+    show_id = Column(Integer, nullable=False, index=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    payload = Column(String, nullable=False)                   # JSON: first seat, names, food
+    status = Column(String, nullable=False, index=True)
+    ref = Column(String)                                       # the booking ref, once their turn came
+    message = Column(String)                                   # why it failed (shown to the person)
+    created_at = Column(Float, nullable=False)
+    expires_at = Column(Float, nullable=False)
+
+
 def upgrade_old_database() -> None:
     """If booking_app.db was made by an older version of this app, replace the outdated
     movie / ticket tables with the current layout. User accounts are kept; old bookings are cleared."""
@@ -353,12 +372,9 @@ def _review_invite(db, order) -> None:
                             due_at=time.time() + REVIEW_DELAY_SECONDS, sent=0))
 
 
-def hold_seats(show_id: int, start_seat: str, user_id: int, names: list, food=None) -> dict:
-    """Step 1 of a booking: hold len(names) seats in one row, starting at start_seat, plus an optional food order,
-    and work out the price. All or nothing. The seats are NOT confirmed until the payment arrives
-    (see confirm_payment); if it never does they are released after PAYMENT_HOLD_SECONDS."""
+def party_seats(start_seat: str, names: list):
+    """Check the party and return (clean names, the seats it needs: start_seat and the ones to its right in the row)."""
     names = [n.strip() for n in names]
-    food_lines = clean_food(food)
     if not 1 <= len(names) <= MAX_PARTY:
         raise ValueError(f"You can book 1 to {MAX_PARTY} people at a time")
     if any(not 1 <= len(n) <= 40 for n in names):
@@ -368,7 +384,15 @@ def hold_seats(show_id: int, start_seat: str, user_id: int, names: list, food=No
     idx = SEATS.index(start_seat)
     if idx % SEATS_PER_ROW + len(names) > SEATS_PER_ROW:
         raise NotEnoughSeats()
-    seats = SEATS[idx: idx + len(names)]
+    return names, SEATS[idx: idx + len(names)]
+
+
+def hold_seats(show_id: int, start_seat: str, user_id: int, names: list, food=None) -> dict:
+    """Step 1 of a booking: hold len(names) seats in one row, starting at start_seat, plus an optional food order,
+    and work out the price. All or nothing. The seats are NOT confirmed until the payment arrives
+    (see confirm_payment); if it never does they are released after PAYMENT_HOLD_SECONDS."""
+    names, seats = party_seats(start_seat, names)
+    food_lines = clean_food(food)
     ref = "BK-" + secrets.token_hex(3).upper()
     release_expired_holds()   # seats whose payment window ran out are free again
 
@@ -471,6 +495,143 @@ def booking_summary(ref: str):
         return {"ref": ref, "email": user.email, "username": user.username, "movie": movie.name, "time": show.time,
                 "seats": [t.seat for t in tickets], "names": [t.attendee for t in tickets], "food": food,
                 "amount": order.amount, "payment_id": order.payment_id}
+
+
+# ---- the waiting line for seats that someone else is paying for right now
+def seat_availability(show_id: int, seats: list) -> str:
+    """"free", "busy" (every needed seat is only HELD by someone who has not paid yet: worth waiting for)
+    or "taken" (at least one seat is paid for: no point waiting)."""
+    with SessionLocal() as db:
+        refs = [r[0] for r in db.query(Ticket.ref).filter(Ticket.show_id == show_id, Ticket.seat.in_(seats))]
+        if not refs:
+            return "free"
+        pending = {o.ref for o in db.query(PaymentOrder).filter(PaymentOrder.ref.in_(refs), PaymentOrder.status == "pending")}
+    return "busy" if all(r in pending for r in refs) else "taken"
+
+
+def _entry_seats(entry) -> list:
+    p = json.loads(entry.payload)
+    return party_seats(p["seat"], p["names"])[1]
+
+
+def _waiters(db, show_id: int):
+    """Everyone still in the line for a show, oldest first."""
+    return db.query(WaitlistEntry).filter(WaitlistEntry.show_id == show_id,
+                                          WaitlistEntry.status.in_(["waiting", "promoting"])) \
+        .order_by(WaitlistEntry.created_at, WaitlistEntry.id).all()
+
+
+def seats_have_waiters(show_id: int, seats: list) -> bool:
+    with SessionLocal() as db:
+        return any(set(_entry_seats(e)) & set(seats) for e in _waiters(db, show_id))
+
+
+def begin_hold(show_id: int, uid: int, start_seat: str, names: list, food: list) -> str:
+    """Hold the seats AND open the payment order. Returns the booking ref (raises SeatTaken, ValueError, PaymentError)."""
+    held = hold_seats(show_id, start_seat, uid, names, food)
+    try:
+        order_id = create_provider_order(held["ref"], held["amount"])
+    except PaymentError:
+        cancel_booking(held["ref"], uid)   # let the seats go again
+        raise
+    with SessionLocal() as db:
+        db.query(PaymentOrder).filter_by(ref=held["ref"]).update({"provider_order_id": order_id})
+        db.commit()
+    return held["ref"]
+
+
+def join_waitlist(show_id: int, uid: int, start_seat: str, names: list, food=None) -> int:
+    """Stand in the line for seats someone else is paying for. Returns the id of the line entry."""
+    names, _ = party_seats(start_seat, names)
+    clean_food(food)   # reject a bad food order now, not when the turn comes
+    now = time.time()
+    with SessionLocal() as db:
+        if db.query(WaitlistEntry).filter(WaitlistEntry.show_id == show_id, WaitlistEntry.user_id == uid,
+                                          WaitlistEntry.status.in_(["waiting", "promoting", "ready"])).first():
+            raise ValueError("You are already in the line for this show. Leave it first to choose other seats")
+        entry = WaitlistEntry(show_id=show_id, user_id=uid, status="waiting", created_at=now, expires_at=now + WAIT_SECONDS,
+                              payload=json.dumps({"seat": start_seat, "names": names, "food": food or []}))
+        db.add(entry)
+        db.commit()
+        return entry.id
+
+
+def request_seats(show_id: int, uid: int, start_seat: str, names: list, food=None) -> dict:
+    """What happens when someone clicks Pay: {"type": "hold", "ref"} when they get the seats at once, or
+    {"type": "queued", "id"} when another person is paying for them. Raises SeatTaken if the seats are paid for."""
+    names, seats = party_seats(start_seat, names)
+    process_waitlist()   # let people who were already waiting go first
+    food = food or []
+    if not seats_have_waiters(show_id, seats):
+        try:
+            return {"type": "hold", "ref": begin_hold(show_id, uid, start_seat, names, food)}
+        except SeatTaken:
+            if seat_availability(show_id, seats) != "busy":
+                raise
+    return {"type": "queued", "id": join_waitlist(show_id, uid, start_seat, names, food)}
+
+
+def _try_promote(wid: int) -> None:
+    """If the seats of waiting entry wid are free now, hold them for that person (their payment window opens)."""
+    with SessionLocal() as db:   # claim it, so two threads cannot promote the same person
+        claimed = db.query(WaitlistEntry).filter(WaitlistEntry.id == wid, WaitlistEntry.status == "waiting") \
+            .update({"status": "promoting"})
+        db.commit()
+        entry = db.get(WaitlistEntry, wid) if claimed else None
+        if not entry:
+            return
+        p, show_id, uid = json.loads(entry.payload), entry.show_id, entry.user_id
+    status, ref, message = "waiting", None, None
+    try:
+        ref = begin_hold(show_id, uid, p["seat"], p["names"], p["food"])
+        status = "ready"
+    except SeatTaken:
+        if seat_availability(show_id, _entry_seats_from(p)) == "taken":
+            status, message = "failed", "Sorry, the person before you paid, so these seats are booked. Please choose other seats."
+        # otherwise somebody else is still paying: keep waiting
+    except (ValueError, NotEnoughSeats) as exc:
+        status, message = "failed", str(exc) or "These seats cannot be booked"
+    except PaymentError:
+        status, message = "failed", "The payment service is not available right now. Please try again."
+    with SessionLocal() as db:
+        db.query(WaitlistEntry).filter_by(id=wid).update({"status": status, "ref": ref, "message": message})
+        db.commit()
+
+
+def _entry_seats_from(payload: dict) -> list:
+    return party_seats(payload["seat"], payload["names"])[1]
+
+
+def process_waitlist(now=None) -> None:
+    """Free unpaid holds, drop people who waited too long, then give the seats to the people in the line, oldest first."""
+    now = time.time() if now is None else now
+    release_expired_holds(now)
+    with SessionLocal() as db:
+        db.query(WaitlistEntry).filter(WaitlistEntry.status == "waiting", WaitlistEntry.expires_at <= now) \
+            .update({"status": "expired", "message": "You waited too long and the seats did not become free."})
+        db.commit()
+        ids = [e.id for e in db.query(WaitlistEntry).filter(WaitlistEntry.status == "waiting")
+               .order_by(WaitlistEntry.created_at, WaitlistEntry.id)]
+    for wid in ids:
+        _try_promote(wid)
+
+
+def leave_waitlist(wid: int, uid: int) -> None:
+    """Leave the line. If it was already your turn, the held seats are released too."""
+    with SessionLocal() as db:
+        entry = db.query(WaitlistEntry).filter_by(id=wid, user_id=uid).first()
+        if not entry:
+            raise NotFound()
+        status, ref = entry.status, entry.ref
+        if status in ("waiting", "promoting", "ready"):
+            entry.status = "cancelled"
+            db.commit()
+    if status == "ready" and ref:
+        try:
+            cancel_booking(ref, uid)   # only if still unpaid: a paid booking must be cancelled (and refunded) on purpose
+        except (NotFound, PaymentError):
+            pass
+    process_waitlist()
 
 
 # ---- talking to the payment provider (Razorpay). Everything that leaves this server goes through razorpay_request.
@@ -739,7 +900,7 @@ def background_worker() -> None:
     """Background loop, every 2 seconds: free the seats of unpaid bookings and send the review emails that are due."""
     while True:
         try:
-            release_expired_holds()
+            process_waitlist()   # frees unpaid holds and gives seats to people waiting for them
             send_due_review_emails()
         except Exception as exc:   # never let the loop die
             print("Background worker error:", type(exc).__name__, exc)
@@ -921,51 +1082,98 @@ def food_menu(uid: int = Depends(current_user)):
 
 @app.get("/api/shows/{sid}/seats")
 def seats(sid: int, uid: int = Depends(current_user)):
-    """state: free / taken (someone else's) / mine (paid) / held (mine, waiting for payment)."""
-    release_expired_holds()
+    """state: free / taken (someone else's, paid) / busy (someone else is paying for it right now: you can join the
+    line) / mine (paid) / held (mine, waiting for payment)."""
+    process_waitlist()
     with SessionLocal() as db:
         if not db.get(Show, sid):
             raise HTTPException(404, "Show not found")
         rows = [(t.seat, t.user_id, t.ref) for t in db.query(Ticket).filter_by(show_id=sid)]
         pending = {o.ref for o in db.query(PaymentOrder).filter(PaymentOrder.status == "pending",
                                                                 PaymentOrder.show_id == sid)}
-    state = {seat: "taken" if owner != uid else ("held" if ref in pending else "mine") for seat, owner, ref in rows}
+    state = {seat: ("busy" if ref in pending else "taken") if owner != uid else ("held" if ref in pending else "mine")
+             for seat, owner, ref in rows}
     return [{"id": s, "state": state.get(s, "free")} for s in SEATS]
+
+
+def checkout_response(ref: str) -> dict:
+    """Everything the page needs to open the payment window for a held booking."""
+    with SessionLocal() as db:
+        order = db.query(PaymentOrder).filter_by(ref=ref).first()
+        user, show = db.get(User, order.user_id), db.get(Show, order.show_id)
+        movie = db.get(Movie, show.movie_id)
+        info = {"order": (order.amount, order.provider, order.provider_order_id, order.expires_at, json.loads(order.payload)),
+                "movie": movie.name, "time": show.time, "show_id": show.id,
+                "prefill": {"name": user.username, "email": user.email, "contact": user.phone}}
+    amount, provider, order_id, expires_at, p = info["order"]
+    food_total = sum(f["qty"] * f["price"] for f in p["food"])
+    return {"queued": False, "ref": ref, "mode": provider, "order_id": order_id, "currency": "INR", "amount": amount,
+            "key_id": RAZORPAY_KEY_ID if provider == "razorpay" else "", "expires_in": max(1, int(expires_at - time.time())),
+            "movie": info["movie"], "time": info["time"], "seats": p["seats"], "ticket_price": ticket_price(info["show_id"]),
+            "ticket_total": amount - food_total, "food": p["food"], "food_total": food_total, "prefill": info["prefill"]}
 
 
 @app.post("/api/shows/{sid}/checkout")
 def checkout(sid: int, data: BookIn, uid: int = Depends(current_user)):
-    """Hold the seats and open a payment order. The booking is NOT confirmed until the payment is verified."""
+    """Hold the seats and open a payment order (the booking is NOT confirmed until the payment is verified).
+    If another person is paying for those seats right now, you join the line instead: {"queued": true, ...}."""
     with SessionLocal() as db:
-        show, user = db.get(Show, sid), db.get(User, uid)
-        if not show:
+        if not db.get(Show, sid):
             raise HTTPException(404, "Show not found")
-        if not user:
+        if not db.get(User, uid):
             raise HTTPException(401, "Please log in again")
-        movie = db.get(Movie, show.movie_id)
-        movie_name, show_time = movie.name, show.time
-        prefill = {"name": user.username, "email": user.email, "contact": user.phone}
     try:
-        held = hold_seats(sid, data.seat.strip().upper(), uid, data.names,
-                          [{"id": f.id, "qty": f.qty} for f in data.food])
+        result = request_seats(sid, uid, data.seat.strip().upper(), data.names, [{"id": f.id, "qty": f.qty} for f in data.food])
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     except NotEnoughSeats:
         raise HTTPException(400, "Not enough seats to the right in that row. Pick a seat further left")
     except SeatTaken:
-        raise HTTPException(409, "Sorry, one of those seats was just taken or is being paid for by someone else. Nothing was booked")
-    try:
-        order_id = create_provider_order(held["ref"], held["amount"])
+        raise HTTPException(409, "Sorry, one of those seats was just booked by someone else. Nothing was booked")
     except PaymentError as exc:
-        cancel_booking(held["ref"], uid)   # let the seats go again
         raise HTTPException(502, f"The payment service is not available right now, please try again. ({str(exc)[:120]})")
+    if result["type"] == "hold":
+        return checkout_response(result["ref"])
+    return waitlist_status(result["id"], uid)
+
+
+def waitlist_status(wid: int, uid: int) -> dict:
     with SessionLocal() as db:
-        db.query(PaymentOrder).filter_by(ref=held["ref"]).update({"provider_order_id": order_id})
-        db.commit()
-    return {"ref": held["ref"], "mode": PAYMENT_MODE, "order_id": order_id, "currency": "INR", "amount": held["amount"],
-            "key_id": RAZORPAY_KEY_ID if PAYMENT_MODE == "razorpay" else "", "expires_in": PAYMENT_HOLD_SECONDS,
-            "movie": movie_name, "time": show_time, "seats": held["seats"], "ticket_price": ticket_price(sid),
-            "ticket_total": held["ticket_total"], "food": held["food"], "food_total": held["food_total"], "prefill": prefill}
+        entry = db.query(WaitlistEntry).filter_by(id=wid, user_id=uid).first()
+        if not entry:
+            raise HTTPException(404, "Not found")
+        status, ref, message, created, show_id = entry.status, entry.ref, entry.message, entry.created_at, entry.show_id
+        seats = _entry_seats(entry)
+        ahead = sum(1 for e in _waiters(db, show_id) if e.id != wid and (e.created_at, e.id) < (created, wid)
+                    and set(_entry_seats(e)) & set(seats))
+        refs = [r[0] for r in db.query(Ticket.ref).filter(Ticket.show_id == show_id, Ticket.seat.in_(seats))]
+        holders = [o.expires_at for o in db.query(PaymentOrder).filter(PaymentOrder.ref.in_(refs), PaymentOrder.status == "pending")] if refs else []
+    if status == "ready":
+        with SessionLocal() as db:
+            order = db.query(PaymentOrder).filter_by(ref=ref).first()
+            still_pending = bool(order and order.status == "pending")
+        if not still_pending:
+            return {"queued": True, "id": wid, "status": "expired", "seats": seats,
+                    "message": "Your payment time ran out and the seats were released."}
+        return {"queued": True, "id": wid, "status": "ready", "seats": seats, "checkout": checkout_response(ref)}
+    return {"queued": True, "id": wid, "status": status, "seats": seats, "message": message or "",
+            "position": ahead + 1, "wait_up_to": max([0] + [int(t - time.time()) for t in holders])}
+
+
+@app.get("/api/waitlist/{wid}")
+def waitlist_get(wid: int, uid: int = Depends(current_user)):
+    """The page asks this every couple of seconds while the person waits for their turn."""
+    process_waitlist()
+    return waitlist_status(wid, uid)
+
+
+@app.delete("/api/waitlist/{wid}")
+def waitlist_leave(wid: int, uid: int = Depends(current_user)):
+    try:
+        leave_waitlist(wid, uid)
+    except NotFound:
+        raise HTTPException(404, "Not found")
+    return {"message": "You left the line"}
 
 
 def booking_response(s: dict) -> dict:
@@ -1110,6 +1318,7 @@ def cancel(ref: str, uid: int = Depends(current_user)):
     except PaymentError as exc:
         raise HTTPException(502, f"We could not process the refund right now, so the booking was NOT cancelled. "
                                  f"Please try again in a moment. ({str(exc)[:120]})")
+    process_waitlist()   # the next person in the line (if any) gets their payment window now
     if result["refunded"]:
         return {"message": f"Booking cancelled. Rs. {result['refunded']} is being refunded to your original payment method.",
                 "refunded": result["refunded"]}
@@ -1426,6 +1635,68 @@ class BookingTests(unittest.TestCase):
             order = db.query(PaymentOrder).filter_by(ref=held["ref"]).one()
             self.assertEqual((order.status, order.payment_id), ("paid", "pay_hook1"))
             self.assertEqual(db.query(ReviewInvite).filter_by(ref=held["ref"]).count(), 1)
+
+    # ---- the waiting line (user ids 9201+, show 9)
+    def test_second_person_waits_and_gets_the_seat_when_the_first_cancels(self):
+        first = request_seats(9, 9201, "A1", ["First"])
+        self.assertEqual(first["type"], "hold")
+        second = request_seats(9, 9202, "A1", ["Second"])
+        self.assertEqual(second["type"], "queued")
+        process_waitlist()
+        with SessionLocal() as db:
+            self.assertEqual(db.get(WaitlistEntry, second["id"]).status, "waiting")   # still held by the first person
+        cancel_booking(first["ref"], 9201)   # the first person cancels at the payment stage
+        process_waitlist()
+        with SessionLocal() as db:
+            entry = db.get(WaitlistEntry, second["id"])
+            self.assertEqual(entry.status, "ready")   # now THEIR payment window is open
+            order = db.query(PaymentOrder).filter_by(ref=entry.ref).one()
+            self.assertEqual((order.user_id, order.status), (9202, "pending"))
+        self.assertEqual(confirm_payment(entry.ref, "pay_second"), "confirmed")
+
+    def test_waiting_person_gets_the_seat_when_the_first_one_times_out(self):
+        first = request_seats(9, 9203, "B1", ["First"])
+        second = request_seats(9, 9204, "B1", ["Second"])
+        process_waitlist(now=time.time() + PAYMENT_HOLD_SECONDS + 1)   # the first person never paid
+        with SessionLocal() as db:
+            self.assertEqual(db.get(WaitlistEntry, second["id"]).status, "ready")
+            self.assertEqual(db.query(PaymentOrder).filter_by(ref=first["ref"]).one().status, "expired")
+
+    def test_waiting_person_is_told_when_the_first_one_pays(self):
+        first = request_seats(9, 9205, "C1", ["First"])
+        second = request_seats(9, 9206, "C1", ["Second"])
+        confirm_payment(first["ref"], "pay_first")
+        process_waitlist()
+        with SessionLocal() as db:
+            entry = db.get(WaitlistEntry, second["id"])
+            self.assertEqual(entry.status, "failed")
+            self.assertIn("booked", entry.message)
+        with self.assertRaises(SeatTaken):   # a seat that is paid for cannot be queued for
+            request_seats(9, 9207, "C1", ["Third"])
+
+    def test_the_line_is_first_come_first_served_and_nobody_jumps_it(self):
+        first = request_seats(9, 9208, "D1", ["First"])
+        second = request_seats(9, 9209, "D1", ["Second"])
+        third = request_seats(9, 9210, "D1", ["Third"])
+        self.assertEqual((second["type"], third["type"]), ("queued", "queued"))
+        cancel_booking(first["ref"], 9208)
+        newcomer = request_seats(9, 9211, "D1", ["Newcomer"])   # the seat is free right now, but two people are ahead
+        with SessionLocal() as db:
+            self.assertEqual(db.get(WaitlistEntry, second["id"]).status, "ready")   # the oldest waiter got it
+            self.assertEqual(db.get(WaitlistEntry, third["id"]).status, "waiting")
+        self.assertEqual(newcomer["type"], "queued")
+
+    def test_leaving_the_line_and_one_line_per_show(self):
+        first = request_seats(9, 9212, "E1", ["First"])
+        waiting = request_seats(9, 9213, "E1", ["Waiter"])
+        with self.assertRaises(ValueError):
+            join_waitlist(9, 9213, "E1", ["Again"])   # already in the line for this show
+        leave_waitlist(waiting["id"], 9213)
+        cancel_booking(first["ref"], 9212)
+        process_waitlist()
+        with SessionLocal() as db:
+            self.assertEqual(db.get(WaitlistEntry, waiting["id"]).status, "cancelled")   # a person who left gets nothing
+        book_seats(9, "E1", 9214, ["Someone else"])
 
     def test_every_movie_has_poster_data(self):
         import datetime
