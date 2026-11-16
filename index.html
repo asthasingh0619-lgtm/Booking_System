@@ -1,0 +1,910 @@
+<!DOCTYPE html>
+<!--
+  SeatBook FRONTEND (everything the user sees in the browser).
+  This file is served by booking.py at http://127.0.0.1:8000/
+  It talks to the backend only through the /api/... URLs defined in booking.py.
+
+  Booking steps on the page:  1. choose a movie  ->  2. choose a show time  ->  3. pick seats
+  Seats are on the LEFT, "Booking details" (your bookings) are on the RIGHT.
+
+  Sections in this file:
+    1. <style>   - colours, layout, dark mode
+    2. <body>    - login/sign-up screen, booking page, booking pop-up
+    3. <script>  - the logic: calls the API, draws movies, times and seats, handles the pop-up
+-->
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SeatBook - Movie Tickets</title>
+<style>
+  :root { --bg:#eceefc; --card:#fff; --text:#1d2033; --muted:#6b7090; --line:#dfe2f0; --field:#f6f7fe; --b1:#5b5bf0; --b2:#9b5cf6; --taken:#cfd3e3; --mine:#12a150; --ok:#067647; --err:#c0262d; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0e1020; --card:#181b30; --text:#eceefc; --muted:#a2a7c8; --line:#2b2f4d; --field:#1f2342; --taken:#363b5c; --ok:#4ade80; --err:#ff8a8a; } }
+  * { box-sizing:border-box; } [hidden] { display:none !important; }
+  body { margin:0; min-height:100vh; color:var(--text); font-family:system-ui,Segoe UI,Roboto,sans-serif; padding:20px;
+         background:radial-gradient(900px 500px at 10% -10%, rgba(91,91,240,.25), transparent), radial-gradient(800px 500px at 100% 110%, rgba(155,92,246,.25), transparent), var(--bg); }
+  button { font:inherit; cursor:pointer; }
+  .btn { padding:11px 16px; border:0; border-radius:10px; color:#fff; font-weight:600; background:linear-gradient(135deg, var(--b1), var(--b2)); transition:transform .1s, opacity .2s; }
+  .btn:hover { transform:translateY(-1px); } .btn:disabled { opacity:.5; transform:none; cursor:not-allowed; }
+  .ghost { background:transparent; color:var(--text); border:1px solid var(--line); border-radius:10px; padding:9px 14px; }
+
+  /* auth */
+  .auth { max-width:880px; margin:4vh auto 0; display:grid; grid-template-columns:1fr 1.1fr; background:var(--card); border-radius:22px; overflow:hidden; box-shadow:0 20px 60px rgba(40,40,110,.22); }
+  .hero { padding:40px 34px; color:#fff; display:flex; flex-direction:column; gap:18px; justify-content:center; background:linear-gradient(150deg, var(--b1), var(--b2)); }
+  .logo { font-weight:800; font-size:1.2rem; letter-spacing:.02em; }
+  .hero h2 { margin:0; font-size:1.9rem; line-height:1.15; }
+  .hero ul { margin:0; padding:0; list-style:none; display:grid; gap:10px; opacity:.95; }
+  .hero li::before { content:"\2713"; display:inline-grid; place-items:center; width:22px; height:22px; margin-right:10px; border-radius:50%; background:rgba(255,255,255,.22); font-size:.8rem; }
+  .panel { padding:34px; }
+  .tabs { display:grid; grid-template-columns:1fr 1fr; background:var(--field); border-radius:12px; padding:4px; margin-bottom:22px; }
+  .tabs button { border:0; background:transparent; color:var(--muted); padding:10px; border-radius:9px; font-weight:600; }
+  .tabs button.on { background:var(--card); color:var(--text); box-shadow:0 2px 8px rgba(0,0,0,.12); }
+  form { display:grid; gap:14px; }
+  h1 { margin:0 0 2px; font-size:1.45rem; } .sub { margin:0 0 18px; color:var(--muted); font-size:.93rem; }
+  label { display:grid; gap:6px; font-size:.84rem; font-weight:600; color:var(--muted); }
+  input, select { width:100%; padding:12px 13px; font-size:1rem; color:var(--text); background:var(--field); border:1.5px solid var(--line); border-radius:10px; outline:none; transition:border-color .15s, box-shadow .15s; }
+  input:focus, select:focus { border-color:var(--b1); box-shadow:0 0 0 4px rgba(91,91,240,.18); }
+  .two { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .pw { position:relative; } .pw input { padding-right:62px; }
+  .eye { position:absolute; right:8px; top:50%; transform:translateY(-50%); border:0; background:transparent; color:var(--b1); font-size:.8rem; font-weight:700; padding:6px; }
+  .meter { height:5px; border-radius:4px; background:var(--line); overflow:hidden; } .meter i { display:block; height:100%; width:0; transition:width .2s, background .2s; }
+  small { color:var(--muted); font-size:.78rem; min-height:1em; }
+  #auth-msg { margin-top:14px; min-height:1.3em; font-size:.92rem; }
+  .ok { color:var(--ok); } .err { color:var(--err); }
+
+  /* app */
+  .wrap { max-width:1040px; margin:0 auto; display:grid; grid-template-columns:minmax(0,1fr); gap:16px; }   /* minmax(0,..) lets the poster slider scroll inside its card instead of widening the page */
+  .wrap > *, .layout > * { min-width:0; }
+  .layout { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(280px,1fr); gap:16px; align-items:start; }
+  .side { position:sticky; top:20px; }
+  .side #mine { max-height:70vh; overflow-y:auto; padding-right:2px; }
+  .card { background:var(--card); border-radius:18px; padding:20px; box-shadow:0 10px 30px rgba(40,40,110,.14); }
+  .top { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+  .hi { font-weight:700; } .hi span { color:var(--muted); font-weight:400; font-size:.85rem; display:block; }
+  h3 { margin:0 0 4px; font-size:1.05rem; }
+
+  /* step 1: poster slider (gallery) */
+  .gallery { position:relative; }
+  .track { display:flex; gap:14px; overflow-x:auto; scroll-snap-type:x mandatory; scroll-behavior:smooth; padding:14px 6px 18px; scrollbar-width:none; cursor:grab; }
+  .track::-webkit-scrollbar { display:none; }
+  .track.drag { scroll-snap-type:none; scroll-behavior:auto; cursor:grabbing; user-select:none; }
+  .poster { flex:0 0 auto; position:relative; width:160px; height:240px; padding:0; border:0; border-radius:14px; overflow:hidden; scroll-snap-align:center; color:#fff; text-align:left;
+            background:linear-gradient(160deg, var(--c1), var(--c2)); box-shadow:0 8px 22px rgba(20,20,60,.28); transition:transform .2s, box-shadow .2s; }
+  .poster:hover, .poster:focus-visible { transform:translateY(-6px) scale(1.03); box-shadow:0 16px 30px rgba(20,20,60,.38); }
+  .poster.on { outline:3px solid var(--b1); outline-offset:3px; }
+  .poster .art { position:absolute; inset:0; display:grid; place-items:center; padding-bottom:64px; font-size:4.4rem; background-size:cover; background-position:center;
+                 background-image:radial-gradient(circle at 30% 20%, rgba(255,255,255,.28), transparent 55%); }
+  .poster .art.img { font-size:0; background-image:var(--img); }
+  .poster .cap { position:absolute; left:0; right:0; bottom:0; display:grid; gap:2px; padding:34px 10px 10px; background:linear-gradient(to top, rgba(0,0,0,.88), rgba(0,0,0,0)); }
+  .poster .cap b { font-size:.92rem; line-height:1.15; } .poster .cap span { font-size:.72rem; opacity:.8; }
+  .pbadge { position:absolute; top:8px; left:8px; padding:3px 8px; border-radius:999px; font-size:.66rem; font-weight:700; background:rgba(18,161,80,.95); color:#fff; }
+  .pbadge.soon { background:rgba(245,179,1,.96); color:#3b2a00; }
+  .poster.on::after { content:"\2713"; position:absolute; top:7px; right:8px; display:grid; place-items:center; width:22px; height:22px; border-radius:50%; font-size:.8rem; font-weight:800; background:#fff; color:var(--b1); }
+  .arrow { position:absolute; top:50%; transform:translateY(-60%); z-index:2; width:40px; height:40px; border-radius:50%; border:0; background:var(--card); color:var(--text); font-size:1.5rem; line-height:1; box-shadow:0 4px 14px rgba(0,0,0,.28); }
+  .arrow:hover { background:var(--b1); color:#fff; } .arrow.prev { left:-10px; } .arrow.next { right:-10px; }
+  .gal-info { font-size:.9rem; color:var(--muted); text-align:center; } .gal-info b { color:var(--text); }
+  @media (prefers-reduced-motion: reduce) { .track { scroll-behavior:auto; } .poster { transition:none; } }
+
+  /* step 2: show times */
+  .step { margin-top:18px; } .step:first-of-type { margin-top:0; }
+  .step h3 span { display:inline-grid; place-items:center; width:22px; height:22px; margin-right:8px; border-radius:50%; background:linear-gradient(135deg, var(--b1), var(--b2)); color:#fff; font-size:.78rem; }
+  .movies, .times { display:flex; flex-wrap:wrap; gap:10px; padding-top:10px; }
+  .movie { text-align:left; display:grid; gap:2px; min-width:130px; padding:11px 14px; background:var(--field); color:var(--text); border:1.5px solid var(--line); border-radius:12px; transition:border-color .15s, transform .1s; }
+  .movie:hover, .time:hover { transform:translateY(-1px); border-color:var(--b1); }
+  .movie b { font-size:.98rem; } .movie span { font-size:.78rem; opacity:.75; }
+  .time { padding:9px 16px; font-weight:600; font-size:.92rem; background:var(--field); color:var(--text); border:1.5px solid var(--line); border-radius:999px; transition:border-color .15s, transform .1s; }
+  .movie.on, .time.on { border-color:var(--b1); background:linear-gradient(135deg, var(--b1), var(--b2)); color:#fff; }
+  .hint { margin-top:16px; padding:12px 14px; border-radius:10px; background:var(--field); color:var(--muted); font-size:.9rem; text-align:center; }
+  .now { font-size:.9rem; color:var(--muted); margin-top:4px; } .now b { color:var(--text); }
+
+  /* step 3: seats */
+  .screen { text-align:center; font-size:.72rem; letter-spacing:.3em; color:var(--muted); border-top:4px solid; border-image:linear-gradient(90deg, transparent, var(--b1), transparent) 1; padding-top:6px; margin:16px 0 12px; }
+  #grid { display:grid; grid-template-columns:repeat(8,1fr); gap:6px; }
+  .seat { padding:9px 0; font-size:.76rem; background:var(--field); color:var(--text); border:1px solid var(--line); border-radius:7px; }
+  .seat:hover:not(:disabled) { background:var(--b1); color:#fff; border-color:var(--b1); }
+  .seat.taken { background:var(--taken); color:var(--muted); cursor:not-allowed; }
+  .seat.held { background:#f5b301; color:#3a2a00; border-color:#f5b301; cursor:not-allowed; }
+  .seat.mine { background:var(--mine); color:#fff; border-color:var(--mine); cursor:default; }
+  .legend { font-size:.76rem; color:var(--muted); margin-top:12px; }
+
+  /* booking details (right side) */
+  .total { color:var(--muted); font-size:.9rem; margin-bottom:8px; }
+  .bk { border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-top:10px; display:grid; gap:4px; font-size:.92rem; }
+  .bk .head { display:flex; justify-content:space-between; gap:8px; } .bk .ref { color:var(--muted); font-size:.8rem; }
+  .bk .lbl { color:var(--muted); }
+  .bk .acts { margin-top:6px; }
+  .mini { padding:6px 11px; font-size:.82rem; border-radius:8px; }
+  #msg { min-height:1.2em; font-size:.92rem; text-align:center; }
+
+  /* booking pop-up */
+  dialog { width:min(440px, 92vw); border:0; border-radius:18px; padding:22px; background:var(--card); color:var(--text); box-shadow:0 25px 70px rgba(0,0,0,.35); }
+  dialog::backdrop { background:rgba(10,12,30,.55); backdrop-filter:blur(3px); }
+  dialog h3 { font-size:1.2rem; margin-bottom:2px; }
+  .stepper { display:flex; align-items:center; gap:14px; margin:10px 0 14px; }
+  .stepper button { width:38px; height:38px; border-radius:50%; border:1px solid var(--line); background:var(--field); color:var(--text); font-size:1.2rem; }
+  .stepper b { min-width:24px; text-align:center; font-size:1.2rem; }
+  #names { display:grid; gap:10px; margin-bottom:12px; }
+  .bill { display:flex; justify-content:space-between; gap:12px; } .bill.total { border-top:1px dashed var(--line,#ccd); margin-top:6px; padding-top:6px; font-weight:700; font-size:1rem; }
+  .paybox { display:grid; gap:8px; margin:12px 0; } .paybox label.m { display:flex; align-items:center; gap:8px; border:1px solid var(--line,#ccd); border-radius:10px; padding:10px 12px; cursor:pointer; }
+  .demo-banner { background:#fff4d6; color:#6b4a00; border-radius:10px; padding:8px 12px; font-size:.84rem; margin:6px 0; }
+  .timer { font-weight:700; font-variant-numeric:tabular-nums; }
+  .preview { background:var(--field); border-radius:10px; padding:10px 12px; font-size:.9rem; margin-bottom:6px; }
+  .actions { display:flex; gap:10px; justify-content:flex-end; margin-top:14px; }
+  /* food ordering inside the booking pop-up: category tabs + cards */
+  #dlg { width:min(580px, 94vw); max-height:92vh; overflow-y:auto; }
+  .food { margin:6px 0 12px; }
+  .food h4 { margin:0 0 8px; font-size:1rem; } .food h4 small { font-weight:400; color:var(--muted); }
+  .ftabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
+  .ftab { padding:6px 13px; font-size:.84rem; font-weight:600; border-radius:999px; background:var(--field); color:var(--text); border:1.5px solid var(--line); }
+  .ftab.on { background:linear-gradient(135deg, var(--b1), var(--b2)); color:#fff; border-color:transparent; }
+  #food-list { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:10px; max-height:260px; overflow-y:auto; padding:2px; }
+  .fcard { display:grid; gap:2px; justify-items:center; text-align:center; padding:12px 8px 10px; background:var(--field); border:1.5px solid var(--line); border-radius:14px; transition:border-color .15s, box-shadow .15s; }
+  .fcard.has { border-color:var(--b1); box-shadow:0 0 0 3px rgba(91,91,240,.15); }
+  .ficon { font-size:2rem; line-height:1.1; }
+  .fname { font-size:.86rem; font-weight:600; } .fprice { font-size:.82rem; color:var(--muted); margin-bottom:6px; }
+  .fadd { width:100%; padding:7px 0; border:1.5px solid var(--b1); border-radius:9px; background:transparent; color:var(--b1); font-weight:700; font-size:.84rem; }
+  .fadd:hover { background:var(--b1); color:#fff; }
+  .fstep { width:100%; display:flex; align-items:center; justify-content:space-between; }
+  .fstep button { width:30px; height:30px; border-radius:50%; border:0; background:linear-gradient(135deg, var(--b1), var(--b2)); color:#fff; font-size:1.05rem; font-weight:700; }
+  .fstep button:disabled { opacity:.4; cursor:not-allowed; }
+  .fstep b { min-width:20px; text-align:center; }
+  .food-total { margin-top:10px; padding:9px 12px; background:var(--field); border-radius:10px; font-size:.9rem; }
+  .food-total b { color:var(--text); }
+
+  /* movie reviews (shown under the page for the selected movie) */
+  textarea { width:100%; padding:12px 13px; font:inherit; font-size:1rem; color:var(--text); background:var(--field); border:1.5px solid var(--line); border-radius:10px; outline:none; resize:vertical; min-height:96px; }
+  textarea:focus { border-color:var(--b1); box-shadow:0 0 0 4px rgba(91,91,240,.18); }
+  .rev-head { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+  .rev-summary { display:flex; align-items:center; gap:10px; margin:6px 0 4px; color:var(--muted); font-size:.9rem; }
+  .rev-summary .big { font-size:1.9rem; color:var(--text); line-height:1; }
+  .stars { letter-spacing:2px; font-size:1.05rem; white-space:nowrap; } .stars .on { color:#f5b301; } .stars .off { color:var(--line); }
+  #rev-list { display:grid; gap:10px; margin-top:12px; }
+  .rev-item { padding:12px 14px; border:1px solid var(--line); border-radius:12px; display:grid; gap:6px; }
+  .rev-top { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .rev-avatar { width:30px; height:30px; border-radius:50%; display:grid; place-items:center; color:#fff; font-weight:700; font-size:.85rem; background:linear-gradient(135deg, var(--b1), var(--b2)); }
+  .rev-name { font-weight:700; } .rev-date { color:var(--muted); font-size:.8rem; margin-left:auto; }
+  .you { font-size:.7rem; font-weight:700; padding:2px 7px; border-radius:999px; background:var(--field); color:var(--b1); border:1px solid var(--line); }
+  .rev-text { font-size:.93rem; line-height:1.45; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .rev-empty { padding:16px; text-align:center; color:var(--muted); background:var(--field); border-radius:12px; font-size:.92rem; }
+  #rev-stars { display:flex; gap:4px; margin:8px 0 12px; }
+  .star { border:0; background:transparent; font-size:2.2rem; line-height:1; padding:0 2px; color:var(--line); transition:transform .1s; }
+  .star.on { color:#f5b301; } .star:hover { transform:scale(1.15); }
+
+  /* congratulation pop-up with crackers */
+  #done { width:100vw; height:100vh; max-width:none; max-height:none; padding:0; background:transparent; border:0; box-shadow:none; overflow:hidden; }
+  #done::backdrop { background:rgba(10,12,30,.6); }
+  #crackers { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+  .done-card { position:relative; width:min(420px, 90vw); margin:12vh auto 0; padding:28px 24px; text-align:center; background:var(--card); color:var(--text); border-radius:22px; box-shadow:0 25px 70px rgba(0,0,0,.4); animation:pop .45s cubic-bezier(.2,1.4,.4,1); }
+  .done-card .big { font-size:3rem; line-height:1; }
+  .done-card h2 { margin:8px 0 4px; font-size:1.7rem; }
+  .done-card .rows { display:grid; gap:6px; text-align:left; margin:16px 0; padding:12px 14px; background:var(--field); border-radius:12px; font-size:.92rem; }
+  .done-card .rows span { color:var(--muted); }
+  @keyframes pop { from { transform:scale(.6); opacity:0; } to { transform:scale(1); opacity:1; } }
+  @media (max-width:860px) { .layout { grid-template-columns:1fr; } .side { position:static; } .side #mine { max-height:none; } }
+  @media (max-width:720px) { .auth { grid-template-columns:1fr; } .hero { padding:24px; } .hero h2 { font-size:1.4rem; } .hero ul { display:none; } .panel { padding:22px; } }
+</style></head>
+<body>
+
+<!-- ============ SCREEN 1: log in / sign up ============ -->
+<section id="auth" class="auth">
+  <aside class="hero">
+    <div class="logo">&#127916; SeatBook</div>
+    <h2>Pick your movie.<br>Pick your seat.</h2>
+    <ul><li>Choose a movie and a show time</li><li>Book for your whole group in one go</li><li>Add popcorn and drinks to your order</li><li>Never a double booking</li></ul>
+  </aside>
+  <div class="panel">
+    <div class="tabs"><button id="tab-login" class="on" type="button">Log in</button><button id="tab-signup" type="button">Sign up</button></div>
+
+    <form id="login-form" novalidate>
+      <div><h1>Welcome back</h1><p class="sub">Log in to book your movie tickets.</p></div>
+      <label>Username<input id="l-user" autocomplete="username" autocapitalize="none"></label>
+      <label>Password<div class="pw"><input id="l-pass" type="password" autocomplete="current-password"><button class="eye" type="button" data-for="l-pass">Show</button></div></label>
+      <button class="btn" id="l-btn">Log in</button>
+    </form>
+
+    <form id="signup-form" novalidate hidden>
+      <div><h1>Create your account</h1><p class="sub">It takes less than a minute.</p></div>
+      <div class="two">
+        <label>Username<input id="s-user" autocomplete="username" autocapitalize="none" maxlength="20"></label>
+        <label>Phone number<input id="s-phone" type="tel" inputmode="numeric" maxlength="10" autocomplete="tel-national"></label>
+      </div>
+      <label>Email<input id="s-email" type="email" autocomplete="email"></label>
+      <label>Password<div class="pw"><input id="s-pass" type="password" autocomplete="new-password"><button class="eye" type="button" data-for="s-pass">Show</button></div></label>
+      <div><div class="meter"><i id="bar"></i></div><small id="bar-text">Use 8+ characters with a letter and a number</small></div>
+      <label>Confirm password<input id="s-pass2" type="password" autocomplete="new-password"></label>
+      <button class="btn" id="s-btn">Create account</button>
+    </form>
+    <div id="auth-msg" role="alert"></div>
+  </div>
+</section>
+
+<!-- ============ SCREEN 2: booking page ============ -->
+<main id="app" class="wrap" hidden>
+  <div class="card top">
+    <div class="hi" id="hi"></div>
+    <button class="ghost" id="logout">Log out</button>
+  </div>
+
+  <div id="msg" role="status"></div>
+
+  <!-- STEP 1: poster slider (gallery) - swipe, drag, use the arrows, or wait for it to slide by itself -->
+  <div class="card gallery-card">
+    <h3><span style="display:inline-grid;place-items:center;width:22px;height:22px;margin-right:8px;border-radius:50%;background:linear-gradient(135deg,var(--b1),var(--b2));color:#fff;font-size:.78rem">1</span>Choose a movie</h3>
+    <div class="gallery">
+      <button class="arrow prev" id="g-prev" type="button" aria-label="Previous movies">&#8249;</button>
+      <div class="track" id="movies" tabindex="0" aria-label="Movie posters"></div>
+      <button class="arrow next" id="g-next" type="button" aria-label="Next movies">&#8250;</button>
+    </div>
+    <div class="gal-info" id="gal-info"></div>
+  </div>
+
+  <div class="layout">
+    <!-- LEFT: step 1 movie -> step 2 show time -> step 3 seats -->
+    <div class="card">
+      <div class="step" id="times-box" hidden>
+        <h3><span>2</span>Choose a show time</h3>
+        <div class="times" id="times"></div>
+      </div>
+
+      <div class="hint" id="hint">Select a movie to see its show timings.</div>
+
+      <div class="step" id="seats-box" hidden>
+        <h3><span>3</span>Pick your seats</h3>
+        <div class="now" id="now"></div>
+        <div class="screen">SCREEN</div>
+        <div id="grid"></div>
+        <div class="legend">Light = free &middot; Grey = taken &middot; Green = yours. Click a free seat to book.</div>
+      </div>
+    </div>
+
+    <!-- RIGHT: booking details -->
+    <aside class="card side">
+      <h3>Booking details</h3>
+      <div class="total" id="total"></div>
+      <div id="mine"></div>
+    </aside>
+  </div>
+
+  <!-- REVIEWS of the selected movie (shown as soon as a movie is chosen) -->
+  <div class="card" id="reviews-card" hidden>
+    <div class="rev-head">
+      <h3 id="rev-title">Reviews</h3>
+      <button class="btn mini" id="rev-write" type="button" hidden>Write a review</button>
+    </div>
+    <div class="rev-summary" id="rev-summary"></div>
+    <div id="rev-list"></div>
+  </div>
+</main>
+
+<!-- ============ POP-UP: how many people + their names ============ -->
+<dialog id="dlg">
+  <h3 id="dlg-title">Book tickets</h3>
+  <p class="sub" id="dlg-sub" style="margin-bottom:6px"></p>
+  <div>Number of people</div>
+  <div class="stepper"><button type="button" id="minus" aria-label="Fewer people">&minus;</button><b id="count">1</b><button type="button" id="plus" aria-label="More people">+</button></div>
+  <div id="names"></div>
+  <div class="food">
+    <h4>Add food &amp; drinks <small>(optional) – tap Add to choose</small></h4>
+    <div class="ftabs" id="food-tabs"></div>
+    <div id="food-list"></div>
+    <div class="food-total" id="food-total"></div>
+  </div>
+  <div class="preview" id="preview"></div>
+  <div id="dlg-err" class="err" role="alert"></div>
+  <div class="actions"><button class="ghost" id="dlg-cancel" type="button">Cancel</button><button class="btn" id="dlg-ok" type="button">Continue to payment</button></div>
+</dialog>
+
+<!-- ============ POP-UP: payment (practice mode when no Razorpay keys are set) ============ -->
+<dialog id="pay">
+  <h3>Complete your payment</h3>
+  <p class="sub" id="pay-sub" style="margin-bottom:6px"></p>
+  <div class="demo-banner">Demo mode &ndash; this is a practice payment, no real money moves. Add Razorpay keys on the server to take real payments.</div>
+  <div class="paybox" id="pay-methods"></div>
+  <p class="sub" style="margin:0">Seats held for <span class="timer" id="pay-timer"></span></p>
+  <div id="pay-err" class="err" role="alert"></div>
+  <div class="actions"><button class="ghost" id="pay-cancel" type="button">Cancel</button><button class="ghost" id="pay-fail" type="button">Simulate failure</button><button class="btn" id="pay-ok" type="button">Pay</button></div>
+</dialog>
+
+<!-- ============ POP-UP: write a review ============ -->
+<dialog id="rev">
+  <h3 id="rev-dlg-title">Review</h3>
+  <p class="sub" style="margin-bottom:0">How was the movie? Tap the stars to rate it.</p>
+  <div id="rev-stars" role="group" aria-label="Star rating"></div>
+  <textarea id="rev-text" maxlength="500" placeholder="Write a short review (optional)"></textarea>
+  <div id="rev-err" class="err" role="alert" style="min-height:1.2em;margin-top:6px"></div>
+  <div class="actions"><button class="ghost" id="rev-cancel" type="button">Cancel</button><button class="btn" id="rev-ok" type="button">Post review</button></div>
+</dialog>
+
+<!-- ============ POP-UP: congratulations with crackers (shown after a booking) ============ -->
+<dialog id="done">
+  <canvas id="crackers"></canvas>
+  <div class="done-card">
+    <div class="big">&#127881;</div>
+    <h2>Congratulations!</h2>
+    <p class="sub" style="margin:0">Your tickets are booked.</p>
+    <div class="rows">
+      <div><span>Movie: </span><b id="done-movie"></b></div>
+      <div><span>Show: </span><b id="done-info"></b></div>
+      <div><span>Seats: </span><b id="done-seats"></b></div>
+      <div><span>Names: </span><b id="done-names"></b></div>
+      <div id="done-food-row" hidden><span>Food: </span><b id="done-food"></b></div>
+      <div><span>Paid: </span><b id="done-paid"></b></div>
+      <div><span>Booking ref: </span><b id="done-ref"></b></div>
+    </div>
+    <button class="btn" id="done-close" type="button">Done</button>
+  </div>
+</dialog>
+
+<script>
+/* ---------- basics: shared variables and helpers ---------- */
+const $ = (id) => document.getElementById(id);
+const MAX_PARTY = 6, PER_ROW = 8, MAX_FOOD_QTY = 10;   // keep in sync with MAX_PARTY, SEATS_PER_ROW and MAX_FOOD_QTY in booking.py
+let token = sessionStorage.getItem("t") || "", meName = "";
+let movies = [];                    // every movie, each with its list of shows
+let movie = null, show = null;      // what the user has chosen so far
+let seatIds = [], seatState = {}, pick = "", names = [];
+let menu = [], cart = {}, foodTab = "All";   // the food menu, what the user added { foodId: quantity }, and the open tab
+
+function amsg(t, ok) { $("auth-msg").textContent = t || ""; $("auth-msg").className = ok ? "ok" : "err"; }
+function msg(t, ok) { $("msg").textContent = t || ""; $("msg").className = ok ? "ok" : "err"; }
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; }
+
+// One function for every call to the backend. It adds the login token automatically.
+async function api(path, method, body) {
+  const h = { "Content-Type": "application/json" };
+  if (token) h.Authorization = "Bearer " + token;
+  const r = await fetch(path, { method: method || "GET", headers: h, body: body ? JSON.stringify(body) : undefined });
+  const d = await r.json().catch(() => ({}));
+  if (r.status === 401 && token) { logout(); throw new Error("Please log in again"); }
+  if (!r.ok) throw new Error(typeof d.detail === "string" ? d.detail : "Something went wrong");
+  return d;
+}
+function logout() { token = ""; sessionStorage.removeItem("t"); $("dlg").close(); $("rev").close(); $("app").hidden = true; $("auth").hidden = false; }
+$("logout").onclick = logout;
+
+/* ---------- log in / sign up screen ---------- */
+function tab(login) {
+  $("tab-login").classList.toggle("on", login); $("tab-signup").classList.toggle("on", !login);
+  $("login-form").hidden = !login; $("signup-form").hidden = login; amsg("");
+}
+$("tab-login").onclick = () => tab(true);
+$("tab-signup").onclick = () => tab(false);
+
+// "Show / Hide" buttons on the password boxes
+document.querySelectorAll(".eye").forEach((b) => b.onclick = () => {
+  const i = $(b.dataset.for); const show = i.type === "password";
+  i.type = show ? "text" : "password"; b.textContent = show ? "Hide" : "Show";
+});
+
+// Password strength bar
+$("s-pass").oninput = () => {
+  const p = $("s-pass").value;
+  const score = (p.length >= 8) + (p.length >= 12) + (/[a-z]/.test(p) && /[A-Z]/.test(p)) + /\d/.test(p) + /[^A-Za-z0-9]/.test(p);
+  const bar = $("bar"); bar.style.width = (p ? Math.max(score, 1) * 20 : 0) + "%";
+  bar.style.background = score <= 2 ? "#e5484d" : score <= 3 ? "#f5b301" : "#12a150";
+  $("bar-text").textContent = p ? ["", "Too weak", "Weak", "Okay", "Good", "Strong"][Math.max(score, 1)] : "Use 8+ characters with a letter and a number";
+};
+
+async function submitAuth(btn, path, body) {
+  btn.disabled = true; amsg("");
+  try { token = (await api(path, "POST", body)).token; sessionStorage.setItem("t", token); start(); }
+  catch (e) { amsg(e.message, false); }
+  btn.disabled = false;
+}
+$("login-form").onsubmit = (e) => {
+  e.preventDefault();
+  const username = $("l-user").value.trim(), password = $("l-pass").value;
+  if (!username || !password) return amsg("Enter your username and password", false);
+  submitAuth($("l-btn"), "/api/login", { username, password });
+};
+$("signup-form").onsubmit = (e) => {
+  e.preventDefault();
+  const username = $("s-user").value.trim(), email = $("s-email").value.trim(), phone = $("s-phone").value.trim(), password = $("s-pass").value;
+  if (!username || !email || !phone || !password) return amsg("Please fill in every field", false);
+  if (password !== $("s-pass2").value) return amsg("The two passwords do not match", false);
+  submitAuth($("s-btn"), "/api/signup", { username, email, phone, password });
+};
+
+/* ---------- booking page: movie -> show time -> seats ---------- */
+async function start() {   // runs after a successful log in
+  const [me, list, food] = await Promise.all([api("/api/me"), api("/api/movies"), api("/api/food")]);
+  meName = me.username;
+  const hi = $("hi"); hi.textContent = "Hi, " + me.username;
+  hi.appendChild(el("span", "", me.email));
+  movies = list; menu = food; movie = null; show = null; pauseUntil = 0; $("reviews-card").hidden = true;
+  $("auth").hidden = true; $("app").hidden = false; msg("");
+  buildGallery(); drawTimes(); drawSeatsArea();
+  loadMine();
+  if (movies.length) chooseMovie(movies[0], true);   // first movie + its first show time are selected by default
+  await openPendingReview();
+}
+
+// Step 1: the poster slider. Clicking a poster chooses the movie and shows its show times (step 2).
+let dragged = false, pauseUntil = 0, hovering = false, autoTimer = 0;
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function releaseInfo(m) {   // "Now showing" if the release date has passed, otherwise "Releasing 20 Nov"
+  const d = new Date(m.release + "T00:00:00"), soon = d > new Date();
+  return { soon, text: soon ? "Releasing " + d.getDate() + " " + MONTHS[d.getMonth()] : "Now showing" };
+}
+function captionText(m) {   // "Epic · ★ 4.5" - the star rating appears once a movie has reviews
+  return m.genre + (m.rating_count ? " \u00b7 \u2605 " + m.rating_avg.toFixed(1) : "");
+}
+function updateGalleryCaptions() {
+  document.querySelectorAll(".poster").forEach((p) => {
+    const m = movies.find((x) => x.id === +p.dataset.id);
+    if (m) p.querySelector(".cap span").textContent = captionText(m);
+  });
+}
+function buildGallery() {
+  const box = $("movies"); box.textContent = "";
+  if (!movies.length) { box.textContent = "No movies are showing right now."; return; }
+  for (const m of movies) {
+    const rel = releaseInfo(m);
+    const b = el("button", "poster"); b.type = "button"; b.dataset.id = m.id;
+    b.style.setProperty("--c1", m.colors[0]); b.style.setProperty("--c2", m.colors[1]);
+    b.setAttribute("aria-label", m.name + ", " + m.genre + ", " + rel.text);
+    const art = el("div", "art" + (m.poster ? " img" : ""), m.poster ? "" : m.emoji);
+    if (m.poster) art.style.setProperty("--img", "url('" + m.poster + "')");
+    b.appendChild(art);
+    b.appendChild(el("span", "pbadge" + (rel.soon ? " soon" : ""), rel.text));
+    const cap = el("div", "cap"); cap.appendChild(el("b", "", m.name)); cap.appendChild(el("span", "", captionText(m)));
+    b.appendChild(cap);
+    b.onclick = () => { if (dragged) { dragged = false; return; } chooseMovie(m); };
+    box.appendChild(b);
+  }
+  markGallery();
+  startGalleryControls();
+}
+// auto = true when the page picks the movie by itself (first movie on load): no scrolling, the slider keeps sliding
+function chooseMovie(m, auto = false) {
+  movie = m; msg("");
+  show = m.shows[0] || null;                  // the first show time is selected too, so the seats appear at once
+  if (!auto) pauseUntil = Infinity;           // the user is booking now, so stop the auto-slide
+  markGallery(); drawTimes(); drawSeatsArea();
+  if (show) loadSeats().catch(() => {});
+  reviewData = null; $("reviews-card").hidden = false;   // show the reviews area at once, then fill it
+  $("rev-title").textContent = "Reviews for " + m.name; $("rev-summary").textContent = ""; $("rev-write").hidden = true;
+  $("rev-list").textContent = "Loading reviews\u2026";
+  loadReviews().catch(() => {});
+  if (auto) return;
+  document.querySelector('.poster[data-id="' + m.id + '"]').scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+  $("times-box").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+function markGallery() {   // highlight the chosen poster and update the line under the slider
+  document.querySelectorAll(".poster").forEach((p) => p.classList.toggle("on", !!movie && +p.dataset.id === movie.id));
+  const info = $("gal-info"); info.textContent = "";
+  if (!movie) { info.textContent = "Swipe, drag or use the arrows to browse. Tap a poster to choose the movie."; return; }
+  info.appendChild(el("b", "", movie.name));
+  info.appendChild(document.createTextNode(" \u00b7 " + movie.genre + " \u00b7 " + movie.language + " \u00b7 " + releaseInfo(movie).text));
+}
+let galleryReady = false;
+function startGalleryControls() {   // arrows, mouse dragging and the gentle auto-slide (set up once)
+  if (galleryReady) return; galleryReady = true;
+  const box = $("movies"), wrap = box.parentElement;
+  const step = () => Math.max(box.clientWidth * 0.8, 170);
+  $("g-prev").onclick = () => { pauseUntil = Date.now() + 10000; box.scrollBy({ left: -step() }); };
+  $("g-next").onclick = () => { pauseUntil = Date.now() + 10000; box.scrollBy({ left: step() }); };
+  // mouse drag (touch screens already swipe by themselves)
+  let down = false, startX = 0, startLeft = 0;
+  box.addEventListener("pointerdown", (e) => { if (e.pointerType !== "mouse") return; down = true; dragged = false; startX = e.clientX; startLeft = box.scrollLeft; pauseUntil = Date.now() + 10000; });
+  window.addEventListener("pointermove", (e) => {
+    if (!down) return;
+    const dx = e.clientX - startX;
+    if (Math.abs(dx) > 5) { dragged = true; box.classList.add("drag"); }
+    if (dragged) box.scrollLeft = startLeft - dx;
+  });
+  window.addEventListener("pointerup", () => { if (!down) return; down = false; box.classList.remove("drag"); setTimeout(() => { dragged = false; }, 0); });
+  box.addEventListener("touchstart", () => { pauseUntil = Date.now() + 10000; }, { passive: true });
+  box.addEventListener("wheel", () => { pauseUntil = Date.now() + 10000; }, { passive: true });
+  wrap.addEventListener("mouseenter", () => { hovering = true; });
+  wrap.addEventListener("mouseleave", () => { hovering = false; });
+  wrap.addEventListener("focusin", () => { hovering = true; });
+  wrap.addEventListener("focusout", () => { hovering = false; });
+  box.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowRight") { box.scrollBy({ left: step() }); e.preventDefault(); }
+    if (e.key === "ArrowLeft") { box.scrollBy({ left: -step() }); e.preventDefault(); }
+  });
+  clearInterval(autoTimer);
+  if (!matchMedia("(prefers-reduced-motion: reduce)").matches)
+    autoTimer = setInterval(() => {   // slide along every 3.5 seconds until the user interacts
+      if ($("app").hidden || hovering || Date.now() < pauseUntil) return;
+      if (box.scrollLeft >= box.scrollWidth - box.clientWidth - 4) box.scrollTo({ left: 0 });
+      else box.scrollBy({ left: 176 });
+    }, 3500);
+}
+
+// Step 2: the show times of the chosen movie. Clicking one shows the seats (step 3).
+function drawTimes() {
+  $("times-box").hidden = !movie;
+  const box = $("times"); box.textContent = "";
+  if (!movie) return;
+  for (const s of movie.shows) {
+    const b = el("button", "time" + (show && show.id === s.id ? " on" : ""), s.time);
+    b.type = "button";
+    b.onclick = () => {
+      show = s; msg(""); drawTimes(); drawSeatsArea(); loadSeats();
+      $("seats-box").scrollIntoView({ behavior: "smooth", block: "nearest" });
+    };
+    box.appendChild(b);
+  }
+}
+
+// Step 3: only visible once a show time is chosen. Before that, a hint tells the user what to do.
+function drawSeatsArea() {
+  $("seats-box").hidden = !show;
+  $("hint").hidden = !!show;
+  $("hint").textContent = movie ? "Now choose a show time to see the seats." : "Select a movie to see its show timings.";
+  const now = $("now"); now.textContent = "";
+  if (show) {
+    now.appendChild(el("b", "", movie.name));
+    now.appendChild(document.createTextNode(" \u00b7 " + movie.language + " \u00b7 " + show.time));
+  }
+}
+
+function refresh() { if (token) { if (show) loadSeats(); loadMine(); if (movie && !$("rev").open) loadReviews().catch(() => {}); } }
+
+async function loadSeats() {
+  if (!show) return;
+  const seats = await api("/api/shows/" + show.id + "/seats");
+  seatIds = seats.map((s) => s.id); seatState = {};
+  const g = $("grid"); g.textContent = "";
+  for (const s of seats) {
+    seatState[s.id] = s.state;   // "free", "taken", "mine" (paid) or "held" (mine, waiting for payment)
+    const b = el("button", "seat " + (s.state === "free" ? "" : s.state), s.id);
+    b.disabled = s.state !== "free";
+    b.onclick = () => openDialog(s.id);
+    g.appendChild(b);
+  }
+}
+
+/* ---------- booking pop-up ---------- */
+// The seats this group would get: the clicked seat plus the ones to its right in the same row.
+function partySeats() {
+  const idx = seatIds.indexOf(pick);
+  if (idx < 0 || idx % PER_ROW + names.length > PER_ROW) return null;
+  return seatIds.slice(idx, idx + names.length);
+}
+function renderDialog() {
+  $("count").textContent = names.length;
+  $("minus").disabled = names.length <= 1; $("plus").disabled = names.length >= MAX_PARTY;
+  const box = $("names"); box.textContent = "";
+  names.forEach((n, i) => {
+    const lab = el("label", "", i === 0 ? "Your name (person 1)" : "Person " + (i + 1) + " name");
+    const inp = el("input"); inp.value = n; inp.maxLength = 40; inp.autocomplete = "off";
+    inp.oninput = () => { names[i] = inp.value; };
+    lab.appendChild(inp); box.appendChild(lab);
+  });
+  const seats = partySeats();
+  const free = seats && seats.every((s) => seatState[s] === "free");
+  renderPreview(seats, free);
+}
+function renderPreview(seats, free) {   // seats and price breakdown (the server works out the real price again when you pay)
+  if (seats === undefined) { seats = partySeats(); free = seats && seats.every((s) => seatState[s] === "free"); }
+  const box = $("preview"); box.textContent = "";
+  if (!seats) box.textContent = "Not enough seats to the right in this row. Pick a seat further left or fewer people.";
+  else if (!free) box.textContent = "Some of these seats are not available: " + seats.join(", ") + ". Pick fewer people or another seat.";
+  else {
+    const price = movie.price || 0, tickets = price * names.length, food = foodTotal();
+    const row = (a, b, cls) => { const r = el("div", "bill" + (cls ? " " + cls : "")); r.appendChild(el("span", "", a)); r.appendChild(el("span", "", b)); box.appendChild(r); };
+    row("Seats " + seats.join(", "), "");
+    row(names.length + " \u00d7 " + rupees(price), rupees(tickets));
+    if (food) row("Food & drinks", rupees(food));
+    row("Total to pay", rupees(tickets + food), "total");
+    $("dlg-ok").textContent = "Pay " + rupees(tickets + food);
+  }
+  $("dlg-ok").disabled = !free;
+}
+/* ---------- food picker: category tabs + a card for every item ---------- */
+const rupees = (n) => "\u20b9" + n;
+function foodTotal() { return menu.reduce((sum, f) => sum + f.price * (cart[f.id] || 0), 0); }
+function setQty(id, q) { cart[id] = Math.max(0, Math.min(MAX_FOOD_QTY, q)); renderFood(); renderPreview(); }
+
+function renderFood() {
+  const cats = ["All", ...new Set(menu.map((f) => f.category))];
+  const tabs = $("food-tabs"); tabs.textContent = "";
+  for (const c of cats) {
+    const t = el("button", "ftab" + (c === foodTab ? " on" : ""), c);
+    t.type = "button"; t.onclick = () => { foodTab = c; renderFood(); };
+    tabs.appendChild(t);
+  }
+  const box = $("food-list"); box.textContent = "";
+  for (const f of menu.filter((m) => foodTab === "All" || m.category === foodTab)) {
+    const q = cart[f.id] || 0;
+    const card = el("div", "fcard" + (q ? " has" : ""));
+    card.appendChild(el("div", "ficon", f.icon));
+    card.appendChild(el("div", "fname", f.name));
+    card.appendChild(el("div", "fprice", rupees(f.price)));
+    if (!q) {
+      const add = el("button", "fadd", "+ Add"); add.type = "button";
+      add.onclick = () => setQty(f.id, 1);
+      card.appendChild(add);
+    } else {
+      const step = el("div", "fstep");
+      const minus = el("button", "", "\u2212"); minus.type = "button"; minus.onclick = () => setQty(f.id, q - 1);
+      const plus = el("button", "", "+"); plus.type = "button"; plus.disabled = q >= MAX_FOOD_QTY; plus.onclick = () => setQty(f.id, q + 1);
+      step.appendChild(minus); step.appendChild(el("b", "", String(q))); step.appendChild(plus);
+      card.appendChild(step);
+    }
+    box.appendChild(card);
+  }
+  // "Your food order" summary under the cards
+  const total = foodTotal(), items = menu.filter((f) => cart[f.id] > 0);
+  const sum = $("food-total"); sum.textContent = "";
+  if (!items.length) { sum.textContent = "No food added yet."; return; }
+  sum.appendChild(document.createTextNode(items.map((f) => cart[f.id] + " \u00d7 " + f.name).join(", ") + " \u2014 Food total: "));
+  sum.appendChild(el("b", "", rupees(total)));
+}
+
+function openDialog(seat) {
+  pick = seat; names = [meName]; cart = {}; foodTab = "All"; $("dlg-err").textContent = "";
+  $("dlg-title").textContent = movie.name;
+  $("dlg-sub").textContent = movie.language + " \u00b7 " + show.time + " \u00b7 starting at seat " + seat + ". Seats are booked together in the same row.";
+  renderDialog(); renderFood(); $("dlg").showModal();
+}
+$("plus").onclick = () => { if (names.length < MAX_PARTY) { names.push(""); renderDialog(); } };
+$("minus").onclick = () => { if (names.length > 1) { names.pop(); renderDialog(); } };
+$("dlg-cancel").onclick = () => $("dlg").close();
+let paying = false;   // true while a payment window is open (the 5-second refresh pauses)
+function finishBooking(d, who) { $("pay").close(); $("dlg").close(); paying = false; msg(d.message, true); refresh(); celebrate(d, who); }
+async function dropHold(ref) { try { await api("/api/bookings/" + ref, "DELETE"); } catch (e) { /* it expires by itself anyway */ } paying = false; refresh(); }
+
+$("dlg-ok").onclick = async () => {
+  const clean = names.map((n) => n.trim());
+  if (clean.some((n) => !n)) { $("dlg-err").textContent = "Enter a name for every person"; return; }
+  $("dlg-ok").disabled = true; $("dlg-err").textContent = "";
+  try {
+    // 1. the server holds the seats and works out the price
+    const c = await api("/api/shows/" + show.id + "/checkout", "POST", {
+      seat: pick, names: clean,
+      food: Object.entries(cart).filter(([, q]) => q > 0).map(([id, qty]) => ({ id, qty })),
+    });
+    paying = true;
+    if (c.mode === "razorpay") await payWithRazorpay(c, clean); else openDemoPayment(c, clean);
+  } catch (e) { $("dlg-err").textContent = e.message; loadSeats().then(renderDialog); }
+  $("dlg-ok").disabled = false;
+};
+
+/* ---------- real payment: Razorpay's own window (card details never touch our server) ---------- */
+function loadRazorpay() {
+  return new Promise((ok, fail) => {
+    if (window.Razorpay) return ok();
+    const sc = document.createElement("script"); sc.src = "https://checkout.razorpay.com/v1/checkout.js";
+    sc.onload = ok; sc.onerror = () => fail(new Error("Could not load the payment window. Check your internet and try again."));
+    document.head.appendChild(sc);
+  });
+}
+async function payWithRazorpay(c, who) {
+  try { await loadRazorpay(); } catch (e) { await dropHold(c.ref); throw e; }
+  const rz = new window.Razorpay({
+    key: c.key_id, order_id: c.order_id, amount: c.amount * 100, currency: c.currency,
+    name: "SeatBook", description: c.movie + " · " + c.time, prefill: c.prefill, timeout: c.expires_in,
+    handler: async (r) => {   // paid: the server checks the signature before confirming
+      try {
+        finishBooking(await api("/api/payments/verify", "POST", { order_id: r.razorpay_order_id, payment_id: r.razorpay_payment_id, signature: r.razorpay_signature }), who);
+      } catch (e) {   // not verified: let the seats go so the person can start again
+        $("dlg-err").textContent = e.message; await dropHold(c.ref); loadSeats().then(renderDialog);
+      }
+    },
+    modal: { ondismiss: () => dropHold(c.ref) },   // closed without paying: release the seats
+  });
+  rz.on && rz.on("payment.failed", (r) => { $("dlg-err").textContent = (r.error && r.error.description) || "Payment failed. You can try again."; });
+  rz.open();
+}
+
+/* ---------- practice payment window (demo mode) ---------- */
+let payTimer = 0;
+function openDemoPayment(c, who) {
+  $("pay-sub").textContent = c.movie + " · " + c.time + " · Seats " + c.seats.join(", ") + " · Amount " + rupees(c.amount);
+  const box = $("pay-methods"); box.textContent = "";
+  ["UPI", "Credit / Debit card", "Net banking"].forEach((m, i) => {
+    const lab = el("label", "m"); const r = el("input"); r.type = "radio"; r.name = "pm"; r.checked = i === 0;
+    lab.appendChild(r); lab.appendChild(document.createTextNode(m)); box.appendChild(lab);
+  });
+  $("pay-ok").textContent = "Pay " + rupees(c.amount); $("pay-err").textContent = "";
+  let left = c.expires_in; clearInterval(payTimer);
+  const tick = () => {
+    $("pay-timer").textContent = Math.floor(left / 60) + ":" + String(left % 60).padStart(2, "0");
+    if (left-- <= 0) { clearInterval(payTimer); $("pay").close(); paying = false; $("dlg-err").textContent = "Payment time ran out and the seats were released. Please choose again."; refresh(); }
+  };
+  tick(); payTimer = setInterval(tick, 1000);
+  const go = async (outcome) => {
+    $("pay-ok").disabled = $("pay-fail").disabled = true; $("pay-err").textContent = "";
+    try { const d = await api("/api/payments/demo", "POST", { ref: c.ref, outcome }); clearInterval(payTimer); finishBooking(d, who); }
+    catch (e) { $("pay-err").textContent = e.message; }
+    $("pay-ok").disabled = $("pay-fail").disabled = false;
+  };
+  $("pay-ok").onclick = () => go("success");
+  $("pay-fail").onclick = () => go("fail");
+  $("pay-cancel").onclick = () => { clearInterval(payTimer); $("pay").close(); };
+  $("pay").onclose = () => { clearInterval(payTimer); if (paying && !$("done").open && !left_paid()) dropHold(c.ref); };
+  $("pay").showModal();
+}
+function left_paid() { return $("dlg").open === false; }   // finishBooking closes #dlg too, so a closed #dlg means "paid"
+
+/* ---------- congratulation pop-up with crackers ---------- */
+let partyFrame = 0;
+function celebrate(d, who) {   // d = reply from the backend, who = the names that were booked
+  $("done-movie").textContent = movie.name;
+  $("done-info").textContent = movie.language + " \u00b7 " + show.time;
+  $("done-seats").textContent = d.seats.join(", ");
+  $("done-names").textContent = who.join(", ");
+  $("done-ref").textContent = d.ref;
+  $("done-paid").textContent = rupees(d.amount);
+  $("done-food-row").hidden = !d.food.length;
+  $("done-food").textContent = d.food.map((f) => f.qty + " \u00d7 " + f.name).join(", ") + " (" + rupees(d.food_total) + ")";
+  $("done").showModal();
+  startCrackers();
+}
+$("done-close").onclick = () => $("done").close();
+$("done").addEventListener("close", () => cancelAnimationFrame(partyFrame));   // also runs when Esc is pressed
+
+// Confetti falls from the top and firework bursts pop in the sky, all drawn on one canvas.
+function startCrackers() {
+  const cv = $("crackers"), ctx = cv.getContext("2d");
+  cancelAnimationFrame(partyFrame);
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;   // no animation if the user turned it off
+  const dpr = window.devicePixelRatio || 1;
+  const W = cv.width = innerWidth * dpr, H = cv.height = innerHeight * dpr;
+  const colors = ["#5b5bf0", "#9b5cf6", "#f5b301", "#12a150", "#e5484d", "#22b8cf", "#ff7ab6"];
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const color = () => colors[Math.floor(Math.random() * colors.length)];
+  let parts = [], lastBurst = 0;
+  const start = performance.now();
+
+  for (let i = 0; i < 150; i++)   // confetti pieces
+    parts.push({ kind: "paper", x: rnd(0, W), y: rnd(-H, 0), vx: rnd(-1, 1) * dpr, vy: rnd(2, 5) * dpr,
+                 size: rnd(6, 12) * dpr, rot: rnd(0, 6.28), vr: rnd(-0.2, 0.2), c: color(), life: 1 });
+
+  function burst(x, y) {   // one firework: sparks flying out in every direction
+    const c = color();
+    for (let i = 0; i < 60; i++) {
+      const a = rnd(0, 6.283), s = rnd(2, 7) * dpr;
+      parts.push({ kind: "spark", x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, size: 2.5 * dpr, c, life: 1 });
+    }
+  }
+
+  function frame(now) {
+    const elapsed = now - start;
+    ctx.clearRect(0, 0, W, H);
+    if (elapsed < 3500 && now - lastBurst > 450) { lastBurst = now; burst(rnd(0.15, 0.85) * W, rnd(0.12, 0.5) * H); }
+    parts = parts.filter((p) => p.life > 0 && p.y < H + 40 * dpr);
+    for (const p of parts) {
+      if (p.kind === "spark") {
+        p.vy += 0.12 * dpr; p.vx *= 0.985; p.x += p.vx; p.y += p.vy; p.life -= 0.014;
+        ctx.globalAlpha = Math.max(p.life, 0); ctx.fillStyle = p.c;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, 6.283); ctx.fill();
+      } else {
+        p.x += p.vx + Math.sin(p.y / 60) * dpr * 0.6; p.y += p.vy; p.rot += p.vr;
+        ctx.globalAlpha = 1; ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+        ctx.fillStyle = p.c; ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2); ctx.restore();
+      }
+    }
+    ctx.globalAlpha = 1;
+    if (parts.length || elapsed < 3500) partyFrame = requestAnimationFrame(frame);
+  }
+  partyFrame = requestAnimationFrame(frame);
+}
+
+/* ---------- reviews: shown under the page for the selected movie ---------- */
+let reviewData = null, revRating = 0;
+let pendingReview = new URLSearchParams(location.search).get("review");   // set when the user came from the review email
+function starsEl(n) {   // 5 stars, the first n filled
+  const w = el("span", "stars"); w.setAttribute("role", "img"); w.setAttribute("aria-label", n + " out of 5 stars");
+  w.appendChild(el("span", "on", "\u2605".repeat(n))); w.appendChild(el("span", "off", "\u2605".repeat(5 - n)));
+  return w;
+}
+const fmtDate = (ts) => { const d = new Date(ts * 1000); return d.getDate() + " " + MONTHS[d.getMonth()] + " " + d.getFullYear(); };
+
+async function loadReviews() {
+  if (!movie) { $("reviews-card").hidden = true; return; }
+  const id = movie.id;
+  const d = await api("/api/movies/" + id + "/reviews");
+  if (!movie || movie.id !== id) return;   // the user picked another movie meanwhile
+  reviewData = d; renderReviews();
+}
+function renderReviews() {
+  const d = reviewData;
+  $("reviews-card").hidden = false;
+  $("rev-title").textContent = "Reviews for " + movie.name;
+  const sum = $("rev-summary"); sum.textContent = "";
+  if (d.count) {
+    sum.appendChild(el("b", "big", d.average.toFixed(1))); sum.appendChild(starsEl(Math.round(d.average)));
+    sum.appendChild(el("span", "", d.count + (d.count === 1 ? " review" : " reviews")));
+  } else sum.textContent = "No ratings yet";
+  const write = $("rev-write"); write.hidden = !d.can_review; write.textContent = d.mine ? "Edit my review" : "Write a review";
+  const list = $("rev-list"); list.textContent = "";
+  if (!d.reviews.length) {
+    list.appendChild(el("div", "rev-empty", "No reviews yet for this movie. After you book tickets, we email you a link to review it."));
+    return;
+  }
+  for (const r of d.reviews) {
+    const item = el("div", "rev-item"), top = el("div", "rev-top");
+    top.appendChild(el("div", "rev-avatar", r.username.charAt(0).toUpperCase()));
+    top.appendChild(el("span", "rev-name", r.username));
+    if (r.mine) top.appendChild(el("span", "you", "You"));
+    top.appendChild(starsEl(r.rating)); top.appendChild(el("span", "rev-date", fmtDate(r.created_at)));
+    item.appendChild(top);
+    if (r.comment) item.appendChild(el("div", "rev-text", r.comment));   // textContent only, so nothing typed can run as code
+    list.appendChild(item);
+  }
+}
+
+async function reloadMovies() {   // refresh the star ratings on the posters
+  movies = await api("/api/movies");
+  if (movie) movie = movies.find((m) => m.id === movie.id) || null;
+  if (movie && show) show = movie.shows.find((s) => s.id === show.id) || null;
+  updateGalleryCaptions();
+}
+
+function drawStars() {
+  const box = $("rev-stars"); box.textContent = "";
+  for (let i = 1; i <= 5; i++) {
+    const b = el("button", "star" + (i <= revRating ? " on" : ""), "\u2605");
+    b.type = "button"; b.setAttribute("aria-label", i + (i === 1 ? " star" : " stars"));
+    b.onclick = () => { revRating = i; drawStars(); };
+    box.appendChild(b);
+  }
+}
+function openReviewDialog() {
+  const mine = reviewData && reviewData.mine;
+  revRating = mine ? mine.rating : 0; $("rev-text").value = mine ? mine.comment : ""; $("rev-err").textContent = "";
+  $("rev-dlg-title").textContent = (mine ? "Edit your review: " : "Review: ") + movie.name;
+  drawStars(); $("rev").showModal();
+}
+$("rev-write").onclick = openReviewDialog;
+$("rev-cancel").onclick = () => $("rev").close();
+$("rev-ok").onclick = async () => {
+  if (!revRating) { $("rev-err").textContent = "Tap the stars to choose a rating"; return; }
+  $("rev-ok").disabled = true; $("rev-err").textContent = "";
+  try {
+    await api("/api/movies/" + movie.id + "/reviews", "POST", { rating: revRating, comment: $("rev-text").value.trim() });
+    $("rev").close(); msg("Thanks! Your review is now shown under the movie.", true);
+    await Promise.all([loadReviews(), reloadMovies()]);
+    $("reviews-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  } catch (e) { $("rev-err").textContent = e.message; }
+  $("rev-ok").disabled = false;
+};
+
+// The link in the review email is  /?review=<movie id>: after logging in, open that movie and its review box.
+async function openPendingReview() {
+  if (!pendingReview) return;
+  const m = movies.find((x) => String(x.id) === pendingReview);
+  pendingReview = null; history.replaceState(null, "", location.pathname);
+  if (!m) return;
+  chooseMovie(m);
+  await loadReviews();
+  if (reviewData && reviewData.can_review) openReviewDialog();
+  else msg("You can review a movie after you have booked tickets for it.", false);
+}
+
+/* ---------- booking details (right side) ---------- */
+async function loadMine() {
+  const d = await api("/api/my/bookings");
+  const box = $("mine"); box.textContent = "";
+  $("total").textContent = d.total_tickets ? "Total tickets: " + d.total_tickets : "";
+  if (!d.bookings.length) { box.textContent = "No bookings yet. Click a free seat to book your tickets."; return; }
+  for (const b of d.bookings) {
+    const card = el("div", "bk");
+    const head = el("div", "head"); head.appendChild(el("b", "", b.movie)); head.appendChild(el("span", "ref", b.ref));
+    card.appendChild(head);
+    const lines = [["Show time: ", b.time], ["Tickets: ", b.seats.length], ["Seats: ", b.seats.join(", ")], ["Names: ", b.names.join(", ")]];
+    if (b.amount) lines.push(["Paid: ", rupees(b.amount)]);
+    if (b.food.length) lines.push(["Food: ", b.food.map((f) => f.qty + " \u00d7 " + f.name).join(", ") + " (" + rupees(b.food_total) + ")"]);
+    for (const [label, value] of lines) {
+      const line = el("div"); line.appendChild(el("span", "lbl", label)); line.appendChild(document.createTextNode(value)); card.appendChild(line);
+    }
+    const acts = el("div", "acts");
+    const cancel = el("button", "ghost mini", "Cancel booking");
+    cancel.onclick = async () => {
+      if (!confirm("Cancel this booking and free its seats? " + (b.amount ? "Your payment of " + rupees(b.amount) + " will be refunded." : ""))) return;
+      try { msg((await api("/api/bookings/" + b.ref, "DELETE")).message, true); } catch (e) { msg(e.message, false); }
+      refresh();
+    };
+    acts.appendChild(cancel); card.appendChild(acts); box.appendChild(card);
+  }
+}
+
+/* ---------- startup ---------- */
+// Re-load the seat map every 5 seconds so other people's bookings show up.
+setInterval(() => { if (token && !$("app").hidden && !$("dlg").open && !$("rev").open && !$("pay").open && !paying) refresh(); }, 5000);
+// If a login token is already saved in this browser tab, skip the login screen.
+if (token) start().catch(() => logout());
+</script></body></html>
